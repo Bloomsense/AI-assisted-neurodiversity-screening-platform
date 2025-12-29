@@ -53,10 +53,10 @@
     },
     build: {
       target: 'esnext',
-      outDir: 'dist', // Make sure this is set
+      outDir: 'dist',
     rollupOptions: {
       output: {
-        manualChunks(id) {
+        manualChunks: (id) => {
           if (id.includes('node_modules')) {
             return id.toString().split('node_modules/')[1].split('/')[0].toString();
           }
@@ -70,3 +70,4 @@
       open: true,
     },
   });
+
