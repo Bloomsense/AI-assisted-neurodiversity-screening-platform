@@ -51,7 +51,7 @@
         '@': path.resolve(__dirname, './src'),
       },
     },
-    base: './',
+    base: '/',
     build: {
       target: 'esnext',
       outDir: 'dist',
