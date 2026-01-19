@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { toast } from 'sonner@2.0.3';
-import { projectId, publicAnonKey } from '../utils/supabase/info.tsx';
+import { supabase } from '../utils/supabase/client';
 
 interface Patient {
   id: number;
@@ -29,10 +29,9 @@ interface Patient {
   status: string;
   lastSession: string;
   riskLevel?: string;
-  screeningStage?: string;
 }
 
-interface Therapist {
+interface Doctors {
   id: number;
   name: string;
   email: string;
@@ -45,7 +44,7 @@ interface Therapist {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [therapists, setTherapists] = useState<Therapist[]>([]);
+  const [therapists, setTherapists] = useState<Doctors[]>([]);
   const [expandedTherapists, setExpandedTherapists] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -60,126 +59,58 @@ export default function AdminDashboard() {
     loadAdminData();
   }, []);
 
+  
+
   const loadAdminData = async () => {
     try {
+      // Update this URL to your Flask backend
+      const API_BASE_URL = import.meta.env.VITE_FLASK_API_URL || 'http://localhost:5000';
+      
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-8d885905/admin/therapists`,
+        `${API_BASE_URL}/api/admin/therapists`,
         {
+          method: 'GET',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Content-Type': 'application/json',
           },
         }
       );
-
+  
       if (response.ok) {
         const data = await response.json();
-        setTherapists(data.therapists || []);
         
-        // Calculate stats
-        const totalPatients = data.therapists.reduce((sum: number, t: Therapist) => sum + t.totalPatients, 0);
-        const activeScreenings = data.therapists.reduce((sum: number, t: Therapist) => 
-          sum + t.patients.filter((p: Patient) => p.status === 'In Progress').length, 0
-        );
-        const completedScreenings = data.therapists.reduce((sum: number, t: Therapist) => 
-          sum + t.patients.filter((p: Patient) => p.status === 'Assessment Complete').length, 0
-        );
-        
-        setStats({
-          totalTherapists: data.therapists.length,
-          totalPatients,
-          activeScreenings,
-          completedScreenings
-        });
+        if (data.success && data.therapists) {
+          setTherapists(data.therapists || []);
+          
+          // Calculate stats
+          const totalPatients = data.therapists.reduce((sum: number, t: Doctors) => sum + t.totalPatients, 0);
+          const activeScreenings = data.therapists.reduce((sum: number, t: Doctors) => 
+            sum + t.patients.filter((p: Patient) => p.status !== 'Assessment Complete').length, 0
+          );
+          const completedScreenings = data.therapists.reduce((sum: number, t: Doctors) => 
+            sum + t.patients.filter((p: Patient) => p.status === 'Assessment Complete').length, 0
+          );
+          setStats({
+            totalTherapists: data.therapists.length,
+            totalPatients,
+            activeScreenings,
+            completedScreenings
+          });
+        } else {
+          console.error('API returned unsuccessful response:', data);
+          toast.error('Failed to load therapists data');
+        }
       } else {
-        // Use mock data if backend is not ready
-        loadMockData();
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('API error:', response.status, errorData);
+        toast.error(`Failed to load data: ${errorData.error || 'Server error'}`);
       }
     } catch (error) {
       console.error('Error loading admin data:', error);
-      loadMockData();
+      toast.error('Failed to connect to backend. Please ensure Flask server is running.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const loadMockData = () => {
-    const mockTherapists: Therapist[] = [
-      {
-        id: 1,
-        name: 'Dr. Sarah Ahmed',
-        email: 'sarah.ahmed@bloomsense.com',
-        role: 'Senior Therapist',
-        status: 'active',
-        lastLogin: '2024-01-20',
-        totalPatients: 4,
-        patients: [
-          { id: 1, name: 'Ahmad Khan', age: 4, status: 'In Progress', lastSession: '2 days ago', riskLevel: 'Moderate', screeningStage: 'M-CHAT' },
-          { id: 2, name: 'Fatima Ali', age: 6, status: 'Assessment Complete', lastSession: '1 week ago', riskLevel: 'Low', screeningStage: 'Complete' },
-          { id: 3, name: 'Hassan Ahmed', age: 3, status: 'Follow-up Needed', lastSession: '3 days ago', riskLevel: 'High', screeningStage: 'Behavior Analysis' },
-          { id: 4, name: 'Aisha Malik', age: 5, status: 'In Progress', lastSession: '5 days ago', riskLevel: 'Low', screeningStage: 'M-CHAT' },
-        ]
-      },
-      {
-        id: 2,
-        name: 'Dr. Ali Hassan',
-        email: 'ali.hassan@bloomsense.com',
-        role: 'Therapist',
-        status: 'active',
-        lastLogin: '2024-01-19',
-        totalPatients: 3,
-        patients: [
-          { id: 5, name: 'Omar Abdullah', age: 4, status: 'In Progress', lastSession: '1 day ago', riskLevel: 'Moderate', screeningStage: 'Behavior Analysis' },
-          { id: 6, name: 'Zainab Hussain', age: 5, status: 'Assessment Complete', lastSession: '4 days ago', riskLevel: 'Low', screeningStage: 'Complete' },
-          { id: 7, name: 'Yusuf Ibrahim', age: 3, status: 'In Progress', lastSession: '2 days ago', riskLevel: 'High', screeningStage: 'M-CHAT' },
-        ]
-      },
-      {
-        id: 3,
-        name: 'Dr. Fatima Khan',
-        email: 'fatima.khan@bloomsense.com',
-        role: 'Therapist',
-        status: 'active',
-        lastLogin: '2024-01-18',
-        totalPatients: 2,
-        patients: [
-          { id: 8, name: 'Layla Mansour', age: 6, status: 'Follow-up Needed', lastSession: '1 week ago', riskLevel: 'Moderate', screeningStage: 'Behavior Analysis' },
-          { id: 9, name: 'Kareem Saeed', age: 4, status: 'In Progress', lastSession: '3 days ago', riskLevel: 'Low', screeningStage: 'M-CHAT' },
-        ]
-      },
-      {
-        id: 4,
-        name: 'Dr. Mohamed Rashid',
-        email: 'mohamed.rashid@bloomsense.com',
-        role: 'Senior Therapist',
-        status: 'active',
-        lastLogin: '2024-01-20',
-        totalPatients: 5,
-        patients: [
-          { id: 10, name: 'Noor Hamza', age: 3, status: 'In Progress', lastSession: '1 day ago', riskLevel: 'High', screeningStage: 'Behavior Analysis' },
-          { id: 11, name: 'Amina Farooq', age: 5, status: 'Assessment Complete', lastSession: '2 days ago', riskLevel: 'Low', screeningStage: 'Complete' },
-          { id: 12, name: 'Ibrahim Tariq', age: 4, status: 'In Progress', lastSession: '4 days ago', riskLevel: 'Moderate', screeningStage: 'M-CHAT' },
-          { id: 13, name: 'Sara Nabil', age: 6, status: 'Follow-up Needed', lastSession: '1 week ago', riskLevel: 'High', screeningStage: 'Behavior Analysis' },
-          { id: 14, name: 'Adam Khalil', age: 3, status: 'In Progress', lastSession: '2 days ago', riskLevel: 'Low', screeningStage: 'M-CHAT' },
-        ]
-      }
-    ];
-
-    setTherapists(mockTherapists);
-    
-    const totalPatients = mockTherapists.reduce((sum, t) => sum + t.totalPatients, 0);
-    const activeScreenings = mockTherapists.reduce((sum, t) => 
-      sum + t.patients.filter(p => p.status === 'In Progress').length, 0
-    );
-    const completedScreenings = mockTherapists.reduce((sum, t) => 
-      sum + t.patients.filter(p => p.status === 'Assessment Complete').length, 0
-    );
-    
-    setStats({
-      totalTherapists: mockTherapists.length,
-      totalPatients,
-      activeScreenings,
-      completedScreenings
-    });
   };
 
   const toggleTherapist = (therapistId: number) => {
@@ -454,11 +385,6 @@ export default function AdminDashboard() {
                                       <span className="text-xs text-gray-500">
                                         Last session: {patient.lastSession}
                                       </span>
-                                      {patient.screeningStage && (
-                                        <span className="text-xs text-gray-500">
-                                          Stage: {patient.screeningStage}
-                                        </span>
-                                      )}
                                     </div>
                                   </div>
                                 </div>
