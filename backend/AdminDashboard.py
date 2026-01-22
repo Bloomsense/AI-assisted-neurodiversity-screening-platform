@@ -15,20 +15,29 @@ CORS(app)
 supabase_url = os.getenv('SUPABASE_URL')
 supabase_key = os.getenv('SUPABASE_KEY')
 
-# Validate environment variables
+# Validate environment variables (with better error handling for Vercel)
 if not supabase_url:
-    raise ValueError("SUPABASE_URL is not set in .env file")
+    print("WARNING: SUPABASE_URL is not set")
+    # Don't raise error immediately - allow app to start, will fail on API calls
+    supabase_url = None
 if not supabase_key:
-    raise ValueError("SUPABASE_KEY is not set in .env file")
+    print("WARNING: SUPABASE_KEY is not set")
+    supabase_key = None
 
-print(f"Supabase URL loaded: {supabase_url[:30]}...")
-print(f"Supabase Key loaded: {supabase_key[:30]}...")
+if supabase_url and supabase_key:
+    print(f"Supabase URL loaded: {supabase_url[:30]}...")
+    print(f"Supabase Key loaded: {supabase_key[:30]}...")
+else:
+    print("ERROR: Supabase credentials not configured. API calls will fail.")
 
 # Helper function to make Supabase REST API calls
 def supabase_query(table_name, select="*", filters=None):
     """
     Query Supabase using REST API
     """
+    if not supabase_url or not supabase_key:
+        raise ValueError("Supabase credentials not configured. Please set SUPABASE_URL and SUPABASE_KEY environment variables.")
+    
     url = f"{supabase_url}/rest/v1/{table_name}"
     headers = {
         'apikey': supabase_key,
