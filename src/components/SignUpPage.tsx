@@ -9,6 +9,8 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
+import { supabase } from '../utils/supabase/client';
+import { toast } from 'sonner';
 
 export default function SignUpPage() {
   const [fullName, setFullName] = useState('');
@@ -41,39 +43,38 @@ export default function SignUpPage() {
     setCnic(formatted);
   };
 
-  const handleSignUp = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Validate password match
-    if (password !== confirmPassword) {
-      alert('Passwords do not match');
-      return;
+    const handleSignUp = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (password !== confirmPassword) {
+    toast.error('Passwords do not match');
+    return;
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email: hospitalEmail,
+    password,
+    options: {
+      data: {
+        fullName,
+        contactNumber,
+        cnic,
+        occupation,
+        address,
+        dob: dob?.toISOString(),
+        role: 'therapist'
+      }
     }
+  });
 
-    // Validate CNIC format
-    if (cnic.replace(/\D/g, '').length !== 13) {
-      alert('Please enter a valid CNIC number (13 digits)');
-      return;
-    }
+  if (error) {
+    alert(error.message);
+    return;
+  }
 
-    // Here you would typically send the data to your backend/database
-    const therapistData = {
-      fullName,
-      dob: dob?.toISOString(),
-      contactNumber,
-      hospitalEmail,
-      cnic,
-      address,
-      occupation,
-      password, // In production, this would be hashed
-    };
-
-    console.log('New therapist registration:', therapistData);
-    
-    // For now, show success message and redirect to login
-    alert('Registration successful! Please sign in with your credentials.');
-    navigate('/');
-  };
+  toast.success('Registration successful. Please check your email to confirm.');
+  navigate('/login');
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 to-cyan-100 p-4">

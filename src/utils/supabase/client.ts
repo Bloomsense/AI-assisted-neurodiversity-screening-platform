@@ -12,7 +12,8 @@ console.log('Initializing Supabase client:', {
 
 export const supabase = createClient(supabaseUrl, publicAnonKey, {
   auth: {
-    persistSession: false,
-    autoRefreshToken: false
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
   }
 });

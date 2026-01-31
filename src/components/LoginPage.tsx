@@ -7,8 +7,10 @@ import { Label } from './ui/label';
 import { Separator } from './ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Shield, UserCircle, Headphones } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
+import { supabase } from '../utils/supabase/client';
+
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -19,10 +21,21 @@ export default function LoginPage() {
   const [helpdeskPassword, setHelpdeskPassword] = useState('');
   const navigate = useNavigate();
 
-  const handleTherapistLogin = (e: React.FormEvent) => {
+const handleTherapistLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Logged in as therapist');
-    navigate('/therapist/dashboard');
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success("Logged in successfully");
+    navigate("/therapist/dashboard");
   };
 
   const handleAdminLogin = (e: React.FormEvent) => {
