@@ -8,6 +8,8 @@ import {
 import { Toaster } from "./components/ui/sonner";
 import LoginPage from "./components/LoginPage";
 import SignUpPage from "./components/SignUpPage";
+import ForgotPasswordPage from "./components/ForgotPasswordPage";
+import ResetPasswordPage from "./components/ResetPasswordPage";
 import TherapistDashboard from "./components/TherapistDashboard";
 import CreateChildProfile from "./components/CreateChildProfile";
 import ScreeningWorkflow from "./components/ScreeningWorkflow";
@@ -27,6 +29,8 @@ export default function App() {
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignUpPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route
             path="/therapist/dashboard"
             element={
