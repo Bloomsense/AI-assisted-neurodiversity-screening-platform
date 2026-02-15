@@ -159,8 +159,15 @@ export default function ScreeningWorkflow() {
       return;
     }
     
-    toast.success('Screening completed successfully!');
-    navigate(childId ? `/therapist/child/${childId}` : '/therapist/dashboard');
+    // Navigate to results screen with all the data
+    navigate('/therapist/screening-results', {
+      state: {
+        mchatAnswers,
+        mchatQuestions,
+        behaviorNotes,
+        childId,
+      },
+    });
   };
 
   const handleSaveDraft = () => {
