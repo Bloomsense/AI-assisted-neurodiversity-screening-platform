@@ -1,10 +1,10 @@
 -- Create the patients table
 CREATE TABLE IF NOT EXISTS patients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  child_name TEXT NOT NULL,
+  name TEXT NOT NULL,
   age INTEGER NOT NULL,
+  date_of_birth DATE,
   gender TEXT,
-  contact_info TEXT,
   caregiver_name TEXT NOT NULL,
   caregiver_contact TEXT,
   remarks TEXT,
@@ -38,8 +38,8 @@ ON patients FOR DELETE
 TO authenticated
 USING (true);
 
--- Create index on child_name for faster searches
-CREATE INDEX IF NOT EXISTS idx_patients_child_name ON patients(child_name);
+-- Create index on name for faster searches
+CREATE INDEX IF NOT EXISTS idx_patients_name ON patients(name);
 
 -- Create index on created_at for sorting
 CREATE INDEX IF NOT EXISTS idx_patients_created_at ON patients(created_at DESC);

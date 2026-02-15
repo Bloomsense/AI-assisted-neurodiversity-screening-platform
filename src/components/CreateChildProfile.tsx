@@ -46,10 +46,9 @@ export default function CreateChildProfile() {
     try {
       // Prepare data for database
       const patientData = {
-        child_name: formData.childName.trim(),
+        name: formData.childName.trim(),
         age: ageNum,
         gender: formData.gender || null,
-        contact_info: formData.contactInfo.trim() || null,
         caregiver_name: formData.caregiverName.trim(),
         caregiver_contact: formData.caregiverPhone.trim() || null,
         remarks: formData.remarks.trim() || null,
