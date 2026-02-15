@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "./ui/button";
 import {
@@ -15,7 +15,6 @@ import {
   Calendar,
   FileText,
   Bell,
-  Plus,
   UserPlus,
   PlayCircle,
   LogOut,
@@ -27,6 +26,16 @@ import { supabase } from "../utils/supabase/client";
 
 export default function TherapistDashboard() {
   const navigate = useNavigate();
+  const [therapistDisplayName, setTherapistDisplayName] = useState<string>("Dr");
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      const fullName = (user.user_metadata?.fullName as string) || user.email?.split("@")[0] || "";
+      const firstName = fullName.trim().split(/\s+/)[0] || "Therapist";
+      setTherapistDisplayName(firstName ? `Dr. ${firstName}` : "Dr");
+    });
+  }, []);
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
@@ -147,7 +156,7 @@ export default function TherapistDashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Welcome Section */}
         <div className="mb-8">
-          <h2 className="text-3xl text-gray-900">Welcome back, Dr. Sarah</h2>
+          <h2 className="text-3xl text-gray-900">Welcome back, {therapistDisplayName}</h2>
           <p className="mt-2 text-gray-600">
             Here's what's happening with your patients today.
           </p>
@@ -213,27 +222,34 @@ export default function TherapistDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {recentNotifications.map((notification) => (
-                  <div
-                    key={notification.id}
-                    className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg"
-                  >
-                    <div className="flex-1">
-                      <p className="text-sm">
-                        <span className="font-medium">
-                          {notification.child}
-                        </span>{" "}
-                        - {notification.message}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {notification.time}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="text-xs">
-                      {notification.type}
-                    </Badge>
+                {recentNotifications.length === 0 ? (
+                  <div className="py-8 text-center text-gray-500 text-sm">
+                    <Bell className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                    <p>No notifications yet.</p>
                   </div>
-                ))}
+                ) : (
+                  recentNotifications.map((notification) => (
+                    <div
+                      key={notification.id}
+                      className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg"
+                    >
+                      <div className="flex-1">
+                        <p className="text-sm">
+                          <span className="font-medium">
+                            {notification.child}
+                          </span>{" "}
+                          - {notification.message}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {notification.time}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-xs">
+                        {notification.type}
+                      </Badge>
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -245,40 +261,55 @@ export default function TherapistDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {recentChildren.map((child) => (
-                  <div
-                    key={child.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
-                    onClick={() => navigate(`/therapist/child/${child.id}`)}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Avatar>
-                        <AvatarFallback>
-                          {child.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-medium">{child.name}</p>
-                        <p className="text-sm text-gray-500">
-                          Age {child.age} • Last session: {child.lastSession}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge
-                      variant={
-                        child.status === "Assessment Complete"
-                          ? "default"
-                          : "secondary"
-                      }
-                      className="text-xs"
+                {recentChildren.length === 0 ? (
+                  <div className="py-8 text-center text-gray-500 text-sm">
+                    <Users className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                    <p className="mb-4">No child profiles yet.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate("/therapist/create-profile")}
                     >
-                      {child.status}
-                    </Badge>
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Create Child Profile
+                    </Button>
                   </div>
-                ))}
+                ) : (
+                  recentChildren.map((child) => (
+                    <div
+                      key={child.id}
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
+                      onClick={() => navigate(`/therapist/child/${child.id}`)}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Avatar>
+                          <AvatarFallback>
+                            {child.name
+                              .split(" ")
+                              .map((n) => n[0])
+                              .join("")}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-medium">{child.name}</p>
+                          <p className="text-sm text-gray-500">
+                            Age {child.age} • Last session: {child.lastSession}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge
+                        variant={
+                          child.status === "Assessment Complete"
+                            ? "default"
+                            : "secondary"
+                        }
+                        className="text-xs"
+                      >
+                        {child.status}
+                      </Badge>
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>

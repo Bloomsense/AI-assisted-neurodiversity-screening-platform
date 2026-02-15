@@ -130,7 +130,12 @@ const handleTherapistLogin = async (e: React.FormEvent) => {
                 <Separator className="my-4" />
                 
                 <div className="space-y-2">
-                  <Button variant="ghost" className="w-full">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-full"
+                    onClick={() => navigate('/forgot-password')}
+                  >
                     Forgot Password?
                   </Button>
                   
