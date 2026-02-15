@@ -13,6 +13,7 @@ import ResetPasswordPage from "./components/ResetPasswordPage";
 import TherapistDashboard from "./components/TherapistDashboard";
 import CreateChildProfile from "./components/CreateChildProfile";
 import ScreeningWorkflow from "./components/ScreeningWorkflow";
+import ScreeningResults from "./components/ScreeningResults";
 import ChildProfileDetail from "./components/ChildProfileDetail";
 import AdminDashboard from "./components/AdminDashboard";
 import AdminSettings from "./components/AdminSettings";
@@ -39,7 +40,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-         <Route
+          <Route
             path="/therapist/create-profile"
             element={
               <ProtectedRoute>
@@ -60,13 +61,16 @@ export default function App() {
             element={<ScreeningWorkflow />}
           />
           <Route
+            path="/therapist/screening-results"
+            element={<ScreeningResults />}
+          />
+          <Route
             path="/therapist/child/:childId"
             element={<ChildProfileDetail />}
           />
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/registration/portal" element={<RegistrationPortal />} />
-          {/* Catch-all route for any unmatched paths */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <Toaster />

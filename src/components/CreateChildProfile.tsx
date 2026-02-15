@@ -6,12 +6,14 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, Save, PlayCircle } from 'lucide-react';
+import { ArrowLeft, Save, PlayCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
+import { supabase } from '../utils/supabase/client';
 
 export default function CreateChildProfile() {
   const navigate = useNavigate();
+  const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     childName: '',
     age: '',
@@ -26,20 +28,65 @@ export default function CreateChildProfile() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = (startScreening = false) => {
+  const handleSave = async (startScreening = false) => {
     if (!formData.childName || !formData.age || !formData.caregiverName) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    // Mock save functionality
-    const childId = Math.random().toString(36).substr(2, 9);
-    toast.success('Child profile created successfully');
+    // Validate age is a valid number
+    const ageNum = parseInt(formData.age);
+    if (isNaN(ageNum) || ageNum < 0 || ageNum > 18) {
+      toast.error('Please enter a valid age (0-18 years)');
+      return;
+    }
 
-    if (startScreening) {
-      navigate(`/therapist/screening/${childId}`);
-    } else {
-      navigate('/therapist/dashboard');
+    setIsSaving(true);
+
+    try {
+      // Prepare data for database
+      const patientData = {
+        name: formData.childName.trim(),
+        age: ageNum,
+        gender: formData.gender || null,
+        caregiver_name: formData.caregiverName.trim(),
+        caregiver_contact: formData.caregiverPhone.trim() || null,
+        remarks: formData.remarks.trim() || null,
+      };
+
+      // Insert into Supabase patients table
+      const { data, error } = await supabase
+        .from('patients')
+        .insert([patientData])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving patient:', error);
+        toast.error(`Failed to save patient: ${error.message}`);
+        setIsSaving(false);
+        return;
+      }
+
+      if (!data || !data.id) {
+        toast.error('Failed to save patient: No data returned');
+        setIsSaving(false);
+        return;
+      }
+
+      const childId = data.id;
+      toast.success('Child profile created successfully');
+
+      if (startScreening) {
+        navigate(`/therapist/screening/${childId}`);
+      } else {
+        navigate(`/therapist/child/${childId}`);
+      }
+    } catch (error: any) {
+      console.error('Error saving patient:', error);
+      toast.error(`Failed to save patient: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -100,9 +147,9 @@ export default function CreateChildProfile() {
                         <SelectValue placeholder="Select gender" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="male">Male</SelectItem>
-                        <SelectItem value="female">Female</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
+                        <SelectItem value="Male">Male</SelectItem>
+                        <SelectItem value="Female">Female</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -163,17 +210,37 @@ export default function CreateChildProfile() {
               <Button 
                 className="flex-1"
                 onClick={() => handleSave(true)}
+                disabled={isSaving}
               >
-                <PlayCircle className="h-4 w-4 mr-2" />
-                Save & Start Screening
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <PlayCircle className="h-4 w-4 mr-2" />
+                    Save & Start Screening
+                  </>
+                )}
               </Button>
               <Button 
                 variant="outline" 
                 className="flex-1"
                 onClick={() => handleSave(false)}
+                disabled={isSaving}
               >
-                <Save className="h-4 w-4 mr-2" />
-                Save Profile
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Profile
+                  </>
+                )}
               </Button>
             </div>
 

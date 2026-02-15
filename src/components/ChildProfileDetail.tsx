@@ -57,7 +57,10 @@ export default function ChildProfileDetail() {
   const [isEditingTag, setIsEditingTag] = useState(false);
   const [tempTag, setTempTag] = useState('');
 
-  const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-8d885905`;
+  // Use local backend in development, cloud backend in production
+  const API_BASE_URL = import.meta.env.DEV 
+    ? 'http://localhost:8000/make-server-8d885905'
+    : `https://${projectId}.supabase.co/functions/v1/make-server-8d885905`;
 
   // Load comments and meetings on component mount
   useEffect(() => {

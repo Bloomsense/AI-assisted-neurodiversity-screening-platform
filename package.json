@@ -59,6 +59,7 @@
       },
       "scripts": {
             "dev": "vite",
+            "dev:backend": "deno run --allow-net --allow-env --allow-read server.ts",
             "build": "vite build",
             "preview": "vite preview"
       }
