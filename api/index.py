@@ -19,8 +19,6 @@ try:
         """
         # Get path and remove /api prefix if present
         path = request.path
-        if path.startswith('/api/'):
-            path = path[4:] if len(path) > 4 else '/'
         
         # Build WSGI environ
         environ = {

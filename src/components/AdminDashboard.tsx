@@ -65,7 +65,7 @@ export default function AdminDashboard() {
     try {
       
       const response = await fetch(
-        'api/admin/therapists',
+        '/api/admin/therapists',
         {
           method: 'GET',
           headers: {
