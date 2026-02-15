@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS patients (
   gender TEXT,
   contact_info TEXT,
   caregiver_name TEXT NOT NULL,
-  caregiver_phone TEXT,
+  caregiver_contact TEXT,
   remarks TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

@@ -51,7 +51,7 @@ export default function CreateChildProfile() {
         gender: formData.gender || null,
         contact_info: formData.contactInfo.trim() || null,
         caregiver_name: formData.caregiverName.trim(),
-        caregiver_phone: formData.caregiverPhone.trim() || null,
+        caregiver_contact: formData.caregiverPhone.trim() || null,
         remarks: formData.remarks.trim() || null,
       };
 
