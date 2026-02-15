@@ -4,9 +4,10 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Download, FileText, Home } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Download, FileText, Home, Loader2 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
+import { supabase } from '../utils/supabase/client';
 
 interface MChatQuestion {
   id: string;
@@ -25,6 +26,8 @@ export default function ScreeningResults() {
   const navigate = useNavigate();
   const location = useLocation();
   const [results, setResults] = useState<ScreeningResultsProps | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [assessmentId, setAssessmentId] = useState<string | null>(null);
 
   // Get data from location state or props
   useEffect(() => {
@@ -32,6 +35,83 @@ export default function ScreeningResults() {
       setResults(location.state as ScreeningResultsProps);
     }
   }, [location.state]);
+
+  // Save assessment to database when results are loaded
+  useEffect(() => {
+    const saveAssessment = async () => {
+      if (!results || !results.mchatAnswers || !results.mchatQuestions || !results.childId) {
+        return;
+      }
+
+      // Check if assessment already saved (to avoid duplicates)
+      if (assessmentId) {
+        return;
+      }
+
+      setIsSaving(true);
+
+      try {
+        const { mchatAnswers, mchatQuestions, behaviorNotes, childId } = results;
+
+        // Calculate results
+        const convertToPassFail = (answer: string): 'Pass' | 'Fail' => {
+          return answer.toLowerCase() === 'no' ? 'Fail' : 'Pass';
+        };
+
+        const passFailResults = mchatQuestions.map((question) => {
+          const answer = mchatAnswers[question.id];
+          const result = answer ? convertToPassFail(answer) : 'Pass';
+          return {
+            question,
+            answer,
+            result,
+          };
+        });
+
+        const failCount = passFailResults.filter((r) => r.result === 'Fail').length;
+        const passCount = passFailResults.filter((r) => r.result === 'Pass').length;
+        const totalQuestions = mchatQuestions.length;
+        const isScreenPositive = failCount >= 2;
+        const riskLevel = isScreenPositive ? 'High Risk' : 'Low Risk';
+
+        // Prepare assessment data
+        const assessmentData = {
+          patient_id: childId,
+          mchat_answers: mchatAnswers,
+          mchat_questions: mchatQuestions,
+          behavior_notes: behaviorNotes || null,
+          total_questions: totalQuestions,
+          pass_count: passCount,
+          fail_count: failCount,
+          risk_level: riskLevel,
+          screen_positive: isScreenPositive,
+        };
+
+        // Insert into Supabase assessments table
+        const { data, error } = await supabase
+          .from('assessments')
+          .insert([assessmentData])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Error saving assessment:', error);
+          // Don't show error to user as results are still displayed
+          // toast.error(`Failed to save assessment: ${error.message}`);
+        } else if (data && data.id) {
+          setAssessmentId(data.id);
+          console.log('Assessment saved successfully:', data.id);
+        }
+      } catch (error: any) {
+        console.error('Error saving assessment:', error);
+        // Don't show error to user as results are still displayed
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    saveAssessment();
+  }, [results, assessmentId]);
 
   // If no data, redirect back
   if (!results || !results.mchatAnswers || !results.mchatQuestions) {
@@ -152,7 +232,18 @@ M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-
               <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
               <div>
                 <h1 className="text-2xl text-gray-900">M-CHAT-R/F Screening Results</h1>
-                <p className="text-sm text-gray-600">Assessment completed</p>
+                <p className="text-sm text-gray-600">
+                  Assessment completed
+                  {isSaving && (
+                    <span className="ml-2 inline-flex items-center text-teal-600">
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      Saving...
+                    </span>
+                  )}
+                  {assessmentId && !isSaving && (
+                    <span className="ml-2 text-green-600">✓ Saved</span>
+                  )}
+                </p>
               </div>
             </div>
           </div>
