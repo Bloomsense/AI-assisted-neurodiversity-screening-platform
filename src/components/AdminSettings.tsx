@@ -24,10 +24,15 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
+import { supabase } from '../utils/supabase/client';
 
 export default function AdminSettings() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('therapists');
+  const [includePersonal, setIncludePersonal] = useState(false); 
+  const [includeScores, setIncludeScores] = useState(true);
+  const [includeTimeline, setIncludeTimeline] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   const therapistAccounts = [
     {
@@ -75,8 +80,163 @@ export default function AdminSettings() {
     pendingAssessments: 23
   };
 
-  const handleExportData = () => {
-    toast.success('Data export initiated. You will receive an email when ready.');
+  // Fetch patient data from Supabase
+  const fetchPatientData = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('patients')
+        .select('*');
+
+      if (error) {
+        throw error;
+      }
+
+      return data || [];
+    } catch (error: any) {
+      console.error('Error fetching patient data:', error);
+      throw new Error(`Failed to fetch patient data: ${error.message}`);
+    }
+  };
+
+  // Convert data to CSV format
+  const convertToCSV = (data: any[]): string => {
+    if (data.length === 0) return '';
+
+    // Get all unique keys from all objects
+    const headers = Array.from(
+      new Set(data.flatMap(obj => Object.keys(obj)))
+    );
+
+    // Create CSV header
+    const csvHeader = headers.join(',');
+
+    // Create CSV rows
+    const csvRows = data.map(row => {
+      return headers.map(header => {
+        const value = row[header];
+        // Handle values that might contain commas, quotes, or newlines
+        if (value === null || value === undefined) return '';
+        const stringValue = String(value);
+        // Escape quotes and wrap in quotes if contains comma, quote, or newline
+        if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+          return `"${stringValue.replace(/"/g, '""')}"`;
+        }
+        return stringValue;
+      }).join(',');
+    });
+
+    return [csvHeader, ...csvRows].join('\n');
+  };
+
+  // Download file helper
+  const downloadFile = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export as CSV
+  const handleExportCSV = async () => {
+    if (!includePersonal) {
+      toast.error('Please enable "Include Personal Information" to export patient data.');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const patientData = await fetchPatientData();
+      
+      if (patientData.length === 0) {
+        toast.warning('No patient data found to export.');
+        setIsExporting(false);
+        return;
+      }
+
+      // Filter data based on options
+      let exportData = patientData.map(patient => ({ ...patient }));
+      
+      // If includeScores is false, remove score-related fields
+      if (!includeScores) {
+        exportData = exportData.map(patient => {
+          const { total_score, iq_score, risk_level, screening_results, ...rest } = patient;
+          return rest;
+        });
+      }
+
+      // If includeTimeline is false, remove timeline-related fields
+      if (!includeTimeline) {
+        exportData = exportData.map(patient => {
+          const { session_date, session_notes, duration, session_status_type, ...rest } = patient;
+          return rest;
+        });
+      }
+
+      const csvContent = convertToCSV(exportData);
+      const timestamp = new Date().toISOString().split('T')[0];
+      downloadFile(csvContent, `patients_export_${timestamp}.csv`, 'text/csv');
+      
+      toast.success(`Successfully exported ${patientData.length} patient records as CSV.`);
+    } catch (error: any) {
+      console.error('Export error:', error);
+      toast.error(`Failed to export data: ${error.message}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Export as JSON
+  const handleExportJSON = async () => {
+    if (!includePersonal) {
+      toast.error('Please enable "Include Personal Information" to export patient data.');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const patientData = await fetchPatientData();
+      
+      if (patientData.length === 0) {
+        toast.warning('No patient data found to export.');
+        setIsExporting(false);
+        return;
+      }
+
+      // Filter data based on options
+      let exportData = patientData.map(patient => ({ ...patient }));
+      
+      // If includeScores is false, remove score-related fields
+      if (!includeScores) {
+        exportData = exportData.map(patient => {
+          const { total_score, iq_score, risk_level, screening_results, ...rest } = patient;
+          return rest;
+        });
+      }
+
+      // If includeTimeline is false, remove timeline-related fields
+      if (!includeTimeline) {
+        exportData = exportData.map(patient => {
+          const { session_date, session_notes, duration, session_status_type, ...rest } = patient;
+          return rest;
+        });
+      }
+
+      const jsonContent = JSON.stringify(exportData, null, 2);
+      const timestamp = new Date().toISOString().split('T')[0];
+      downloadFile(jsonContent, `patients_export_${timestamp}.json`, 'application/json');
+      
+      toast.success(`Successfully exported ${patientData.length} patient records as JSON.`);
+    } catch (error: any) {
+      console.error('Export error:', error);
+      toast.error(`Failed to export data: ${error.message}`);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleAddTherapist = () => {
@@ -87,6 +247,7 @@ export default function AdminSettings() {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
     toast.success(`Therapist status updated to ${newStatus}`);
   };
+
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -288,11 +449,10 @@ export default function AdminSettings() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Database className="h-5 w-5 mr-2" />
-                  Data Export & Research
+                  <Database className="h-5 w-5 mr-2" /> Data Export
                 </CardTitle>
                 <CardDescription>
-                  Export anonymized data for research and policy development
+                  Export Patient data for data backups
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -302,15 +462,27 @@ export default function AdminSettings() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <Label htmlFor="includePersonal">Include Personal Information</Label>
-                        <Switch id="includePersonal" />
+                        <Switch 
+                          id="includePersonal" 
+                          checked={includePersonal}
+                          onCheckedChange={setIncludePersonal}
+                        />
                       </div>
                       <div className="flex items-center justify-between">
                         <Label htmlFor="includeScores">Include Assessment Scores</Label>
-                        <Switch id="includeScores" defaultChecked />
+                        <Switch 
+                          id="includeScores" 
+                          checked={includeScores}
+                          onCheckedChange={setIncludeScores}
+                        />
                       </div>
                       <div className="flex items-center justify-between">
                         <Label htmlFor="includeTimeline">Include Session Timeline</Label>
-                        <Switch id="includeTimeline" defaultChecked />
+                        <Switch 
+                          id="includeTimeline" 
+                          checked={includeTimeline}
+                          onCheckedChange={setIncludeTimeline}
+                        />
                       </div>
                     </div>
                   </div>
@@ -318,17 +490,23 @@ export default function AdminSettings() {
                   <div className="space-y-4">
                     <h4 className="font-medium">Export Format</h4>
                     <div className="space-y-2">
-                      <Button variant="outline" className="w-full justify-start" onClick={handleExportData}>
+                      <Button 
+                        variant="outline" 
+                        className="w-full justify-start" 
+                        onClick={handleExportCSV}
+                        disabled={isExporting || !includePersonal}
+                      >
                         <Download className="h-4 w-4 mr-2" />
-                        Export as CSV
+                        {isExporting ? 'Exporting...' : 'Export as CSV'}
                       </Button>
-                      <Button variant="outline" className="w-full justify-start" onClick={handleExportData}>
+                      <Button 
+                        variant="outline" 
+                        className="w-full justify-start" 
+                        onClick={handleExportJSON}
+                        disabled={isExporting || !includePersonal}
+                      >
                         <Download className="h-4 w-4 mr-2" />
-                        Export as JSON
-                      </Button>
-                      <Button variant="outline" className="w-full justify-start" onClick={handleExportData}>
-                        <Download className="h-4 w-4 mr-2" />
-                        Export Research Report
+                        {isExporting ? 'Exporting...' : 'Export as JSON'}
                       </Button>
                     </div>
                   </div>
@@ -339,7 +517,15 @@ export default function AdminSettings() {
             <Card>
               <CardHeader>
                 <CardTitle>Data Import</CardTitle>
-                <CardDescription>Import assessment data from external sources</CardDescription>
+                <CardDescription>Import existing patient data : (Data must be in CSV format)
+                  <ul className="list-disc list-outside ml-4 mt-2 space-y-1">
+                    <li><b>To Import Patient data, enter a valid CSV file with the following columns:</b>  Hospital_patient_id, name, age, gender, caregiver_contact.<br/> Optional fields include: caregiver_name, date_of_birth, remarks, status(active/inactive) </li>
+                    <li><b>To Import Patient data along with Assessment scores, enter a valid CSV file with the following columns:</b> Hospital_patient_id, total_score. <br/> Optional fields include iq_score, notes, risk_level(moderate/high/low)</li> 
+                    <li><b>To Import Patient data along with Session History, enter a valid CSV file with the following columns:</b> Hospital_patient_id, session_date, session_notes. <br/> Optional fields include duration, session_status_type(scheduled/completed/cancelled)</li>
+                    <li><b>To Import Patient data along with Assessment & Session history, enter a valid CSV file with the following columns:</b> Hospital_patient_id, name, age, gender, caregiver_contact, total_score, session_date, session_notes. <br/> Optional fields include as above of all files</li>
+                  </ul>
+
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">

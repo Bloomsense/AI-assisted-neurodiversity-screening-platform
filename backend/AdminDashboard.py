@@ -154,7 +154,7 @@ def get_therapists():
                 'doctor_id': str(doctor_id),
                 'name': doctor.get('name') or f"Dr. {doctor.get('user_id', 'Unknown')}",
                 'email': doctor_email,
-                'role': doctor.get('occupation') or 'Therapist',
+                'occupation': doctor.get('occupation') or 'Therapist',
                 'status': doctor.get('status') or 'active',
                 'lastLogin': last_login_str,
                 'totalPatients': active_patients,

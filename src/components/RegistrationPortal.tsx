@@ -127,7 +127,7 @@ export default function RegistrationPortal() {
       
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
-
+      
       const { data, error } = await supabase
         .from('appointments')
         .select('*')
