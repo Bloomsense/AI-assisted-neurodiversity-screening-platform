@@ -112,7 +112,7 @@ export default function TherapistDashboard() {
               <Button 
                 variant="outline" 
                 className="h-auto p-4 flex flex-col items-center space-y-2"
-                onClick={() => navigate('/therapist/screening')}
+                onClick={() => navigate('/therapist/questionnaire-selection')}
               >
                 <FileText className="h-8 w-8" />
                 <span>Continue Existing Screening</span>

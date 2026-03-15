@@ -78,7 +78,8 @@ export default function CreateChildProfile() {
       toast.success('Child profile created successfully');
 
       if (startScreening) {
-        navigate(`/therapist/screening/${childId}`);
+        // First let the therapist choose which questionnaire to run
+        navigate(`/therapist/questionnaire-selection/${childId}`);
       } else {
         navigate(`/therapist/child/${childId}`);
       }
