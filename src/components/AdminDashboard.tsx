@@ -29,10 +29,12 @@ interface Patient {
   status: string;
   lastSession: string;
   riskLevel?: string;
+  screeningStage?: string;
 }
 
 interface Doctors {
   id: number;
+  doctor_id?: string;
   name: string;
   email: string;
   occupation: string;
@@ -63,49 +65,162 @@ export default function AdminDashboard() {
 
   const loadAdminData = async () => {
     try {
-      
-      const response = await fetch(
-        '/api/admin/therapists',
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+      // Fetch doctors, patients, and users directly from Supabase
+      const [doctorsResult, patientsResult, usersResult] = await Promise.all([
+        supabase.from('doctors').select('*'),
+        supabase.from('patients').select('*'),
+        supabase.from('users').select('user_id,email')
+      ]);
+
+      if (doctorsResult.error) throw doctorsResult.error;
+      if (patientsResult.error) throw patientsResult.error;
+      if (usersResult.error) throw usersResult.error;
+
+      const doctors_data = doctorsResult.data || [];
+      const patients_data = patientsResult.data || [];
+      const users_data = usersResult.data || [];
+
+      // Create users dictionary for email lookup
+      const users_dict: Record<string, string> = {};
+      users_data.forEach((user: any) => {
+        if (user.user_id) {
+          users_dict[user.user_id] = user.email || '';
         }
-      );
-  
-      if (response.ok) {
-        const data = await response.json();
-        
-        if (data.success && data.therapists) {
-          setTherapists(data.therapists || []);
-          
-          // Calculate stats
-          const totalPatients = data.therapists.reduce((sum: number, t: Doctors) => sum + t.totalPatients, 0);
-          const activeScreenings = data.therapists.reduce((sum: number, t: Doctors) => 
-            sum + t.patients.filter((p: Patient) => p.status !== 'Assessment Complete').length, 0
-          );
-          const completedScreenings = data.therapists.reduce((sum: number, t: Doctors) => 
-            sum + t.patients.filter((p: Patient) => p.status === 'Assessment Complete').length, 0
-          );
-          setStats({
-            totalTherapists: data.therapists.length,
-            totalPatients,
-            activeScreenings,
-            completedScreenings
+      });
+
+      // Transform data to match AdminDashboard interface
+      const therapists: Doctors[] = [];
+
+      for (const doctor of doctors_data) {
+        const doctor_id = doctor.doctor_id;
+
+        // Get patients assigned to this doctor
+        const doctor_patients = patients_data.filter(
+          (p: any) => p.assigned_doctor_id === doctor_id
+        );
+
+        // Transform patient data
+        const formatted_patients: Patient[] = [];
+        for (const patient of doctor_patients) {
+          const last_session = patient.last_session_date || patient.last_session;
+          let last_session_str = 'No sessions yet';
+
+          if (last_session) {
+            try {
+              const last_session_date = new Date(last_session);
+              const now = new Date();
+              const days_ago = Math.floor(
+                (now.getTime() - last_session_date.getTime()) / (1000 * 60 * 60 * 24)
+              );
+
+              if (days_ago === 0) {
+                last_session_str = 'Today';
+              } else if (days_ago === 1) {
+                last_session_str = '1 day ago';
+              } else {
+                last_session_str = `${days_ago} days ago`;
+              }
+            } catch {
+              last_session_str = 'Recently';
+            }
+          }
+
+          formatted_patients.push({
+            id: patient.patient_id || patient.id,
+            name: patient.name || patient.patient_name || patient.full_name || 'Unknown',
+            age: patient.age || patient.patient_age || 0,
+            status: patient.status || patient.screening_status || 'In Progress',
+            lastSession: last_session_str,
+            riskLevel: patient.risk_level || patient.riskLevel,
+            screeningStage: patient.screening_stage || patient.screeningStage
           });
-        } else {
-          console.error('API returned unsuccessful response:', data);
-          toast.error('Failed to load therapists data');
         }
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('API error:', response.status, errorData);
-        toast.error(`Failed to load data: ${errorData.error || 'Server error'}`);
+
+        // Get email from users table
+        const user_id = doctor.user_id;
+        let doctor_email = users_dict[user_id] || '';
+
+        if (!doctor_email && user_id) {
+          doctor_email = `doctor${String(user_id).slice(0, 8)}@bloomsense.com`;
+        }
+
+        // Use active_patients from doctors table
+        const active_patients = doctor.active_patients || formatted_patients.length;
+
+        // Get last login
+        const last_login = doctor.last_login || doctor.created_at;
+        let last_login_str = '2024-01-20';
+
+        if (last_login) {
+          try {
+            const login_date = new Date(last_login);
+            last_login_str = login_date.toISOString().split('T')[0];
+          } catch {
+            last_login_str = '2024-01-20';
+          }
+        }
+
+        // Convert doctor_id (UUID) to numeric ID
+        let numeric_id: number;
+        try {
+          const doctor_id_str = String(doctor_id).replace(/-/g, '');
+          numeric_id =
+            doctor_id_str.length >= 8
+              ? parseInt(doctor_id_str.slice(0, 8), 16)
+              : Math.abs(
+                  doctor_id_str
+                    .split('')
+                    .reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0) %
+                    1000000
+                );
+        } catch {
+          numeric_id = Math.abs(
+            String(doctor_id)
+              .split('')
+              .reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0) % 1000000
+          );
+        }
+
+        therapists.push({
+          id: numeric_id,
+          doctor_id: String(doctor_id),
+          name: doctor.name || `Dr. ${doctor.user_id || 'Unknown'}`,
+          email: doctor_email,
+          occupation: doctor.occupation || 'Therapist',
+          status: doctor.status || 'active',
+          lastLogin: last_login_str,
+          totalPatients: active_patients,
+          patients: formatted_patients
+        });
       }
-    } catch (error) {
+
+      setTherapists(therapists);
+
+      // Calculate stats
+      const totalPatients = therapists.reduce(
+        (sum: number, t: Doctors) => sum + t.totalPatients,
+        0
+      );
+      const activeScreenings = therapists.reduce(
+        (sum: number, t: Doctors) =>
+          sum + t.patients.filter((p: Patient) => p.status !== 'Assessment Complete').length,
+        0
+      );
+      const completedScreenings = therapists.reduce(
+        (sum: number, t: Doctors) =>
+          sum + t.patients.filter((p: Patient) => p.status === 'Assessment Complete').length,
+        0
+      );
+
+      setStats({
+        totalTherapists: therapists.length,
+        totalPatients,
+        activeScreenings,
+        completedScreenings
+      });
+    } catch (error: any) {
       console.error('Error loading admin data:', error);
-      toast.error('Failed to connect to backend. Please ensure the server is running.');
+      toast.error(`Failed to load data: ${error?.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
