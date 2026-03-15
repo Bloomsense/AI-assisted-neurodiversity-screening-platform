@@ -1,61 +1,0 @@
-Ë
-    VgiÓ
-  ã                   ó  — U d Z ddlmZmZ ddlmZ ddlm Z mZ ddl	Z	ddl
-m
-Z
-mZm
-Z
-  ee«      Z ee«        e	j                   d d«      Z e	j                   d	d
-«      Z	  e ee«      Zeed
-<    ed«        ed
-e› «       ej/                  ddg¬«      d„ «       Zej/                  ddg¬«      d„ «       Zedk(  r. e e	j                   dd«      «      Zej9                  ded¬«       yy# e$ rZ ede› «       ‚ dZ[ww xY w)zj
-BloomSense Questionnaire API
-Flask backend for fetching neurodiversity screening questions from Supabase
-é    )ÚFlaskÚ jsonify)ÚCORS)Ú
-create_clientÚClientN)ÚListÚDictÚAnyÚSUPABASE_URLz(https://irqqfedhzzxysdiowuft.supabase.coÚSUPABASE_KEYzÐeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlycXFmZWRoenp4eXNkaW93dWZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM2MDkwMDksImV4cCI6MjA3OTE4NTAwOX0.lf4PAQiqSCcBXJQ1nJCvfkENoUl4nLLHx47a74wvd1cÚsupabaseu,   âœ“ Supabase client initialized successfullyz   URL: u*   âœ— Failed to initialize Supabase client: z/api/questionnaire/questionsÚGET)Ú methodsc                  ór  — 	 t        d«       t        j                  d«      j                   d«      j	                  dd¬«      j
-                  «       } t        d | j                  du› d	| j                  rt        | j                  «      nd
-› «       | j                  r.t        d
-| j                  t        | j                  «      dœ«      d
-fS t        d«       t        d
-g d
-ddœ«      d
-fS # t        $ rH}t        |«      }t        d|› «       d
-dl
-}|j                  «        t        d|ddœ«      dfcY d}~S d}~ww xY w)zi
-    Fetch all questions from the questionaire table
-    Returns questions ordered by question_order
-    z#Fetching questions from Supabase...ÚquestionairezDquestion_id, question_text, question_order, max_score, critical_itemÚquestion_orderF)Údescz"Supabase response received. Data: Nz	, Count: r   T)Ú successÚ	questionsÚcountéÈ   z'Warning: No questions found in databasezNo questions found)r   r   r   Ú messagezError fetching questions: z'Failed to fetch questions from database)r   Úerrorr   iô  )
-Úprintr
-   ÚtableÚselectÚorderÚ executeÚdataÚlenr   Ú	ExceptionÚstrÚ	tracebackÚ	print_exc)ÚresponseÚeÚ	error_msgr#   s       ú…C:\Users\UMAIMA MEHMOOD\Desktop\BloomSense\AI-assisted-neurodiversity-screening-platform-main\backend\bloomsense_questionnaire_api.pyÚget_questionnaire_questionsr)      sW  € ð"Ü
-Ð3Ô4ä—>‘> .Ó1ß
-‰VÐZÓ
-[ß
-‰UÐ#¨%ˆUÓ
-0ß
-‰W‹Yð  	ô
- 	Ð2°8·=±=ÈÐ3LÐ2MÈYÐmu×mzÒmzÔWZÐ[c×[hÑ[hÔWið  ABð  WCð  Dô  	Eà
-=Š=ÜØØ%Ÿ]™]Ü˜XŸ]™]Ó+ñ ó ð ð	ð 
-ô 
-Ð;Ô<ÜØØØØ/ñ	ó ð
- ð
-ð 
-øô ò 	Ü˜“Fˆ	Ü
-Ð*¨9¨+Ð6Ô7ÛØ×ÑÔÜØØØ@ñ 
-ó 
-ð 
-ð	õ 	ûð
-	ús$   ‚CC% ÃC% Ã%	D6Ã.=D1Ä+D6Ä1D6z/api/questionnaire/healthc                  ó"   — t        dddœ«      dfS )zHealth check endpointÚokzBloomSense Questionnaire API)ÚstatusÚ servicer   )r   © ó    r(   Úhealth_checkr0   H   s&   € ô ØØ1ñó  ð 	ð ð r/   Ú__main__ÚPORTiˆ  z 0.0.0.0T)ÚhostÚportÚdebug)Ú __doc__Úflaskr   r   Ú
-flask_corsr   r
-   r   r    ÚosÚtypingr   r	   r
-   Ú__name__ÚappÚgetenvr
-   r   Ú__annotations__r   r!   r&   Úrouter)   r0   Úintr4   Úrunr.   r/   r(   ú<module>rB      s3  ðò÷
- !Ý ß *Û 	ß "Ñ "á
-ˆHƒo€Ù €S„	ð ˆry‰y˜Ð)SÓT€Øˆry‰y˜ð  *|ó  }€ð
-Ù$ \°<Ó@€HˆfÓ@Ù	Ð8Ô:Ù	ˆGL>Ð
-"Ô#ð ‡Ð
-)°E°7€Ó;ñ'ó <ð'ðT ‡Ð
-&°° €Ó8ñó 9ðð ˆzÒñ ˆyˆry‰y˜ Ó&Ó
-'€DØ ‡GG ¨T€GÕ2ð	 øðs ò 
-Ù	Ð6°q°cÐ
-:Ô;Ø	ûð
-ús   Á!C( Ã(C>Ã-C9Ã9C>
