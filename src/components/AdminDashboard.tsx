@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { toast } from 'sonner@2.0.3';
-import { projectId, publicAnonKey } from '../utils/supabase/info.tsx';
+import { supabase } from '../utils/supabase/client';
 
 interface Patient {
   id: number;
@@ -32,7 +32,7 @@ interface Patient {
   screeningStage?: string;
 }
 
-interface Therapist {
+interface Doctors {
   id: number;
   name: string;
   email: string;
@@ -45,7 +45,7 @@ interface Therapist {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [therapists, setTherapists] = useState<Therapist[]>([]);
+  const [therapists, setTherapists] = useState<Doctors[]>([]);
   const [expandedTherapists, setExpandedTherapists] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -60,50 +60,8 @@ export default function AdminDashboard() {
     loadAdminData();
   }, []);
 
-  const loadAdminData = async () => {
-    try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-8d885905/admin/therapists`,
-        {
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-          },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setTherapists(data.therapists || []);
-        
-        // Calculate stats
-        const totalPatients = data.therapists.reduce((sum: number, t: Therapist) => sum + t.totalPatients, 0);
-        const activeScreenings = data.therapists.reduce((sum: number, t: Therapist) => 
-          sum + t.patients.filter((p: Patient) => p.status === 'In Progress').length, 0
-        );
-        const completedScreenings = data.therapists.reduce((sum: number, t: Therapist) => 
-          sum + t.patients.filter((p: Patient) => p.status === 'Assessment Complete').length, 0
-        );
-        
-        setStats({
-          totalTherapists: data.therapists.length,
-          totalPatients,
-          activeScreenings,
-          completedScreenings
-        });
-      } else {
-        // Use mock data if backend is not ready
-        loadMockData();
-      }
-    } catch (error) {
-      console.error('Error loading admin data:', error);
-      loadMockData();
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const loadMockData = () => {
-    const mockTherapists: Therapist[] = [
+    const mockTherapists: Doctors[] = [
       {
         id: 1,
         name: 'Dr. Sarah Ahmed',
@@ -166,20 +124,73 @@ export default function AdminDashboard() {
 
     setTherapists(mockTherapists);
     
+    // Calculate stats from mock data
     const totalPatients = mockTherapists.reduce((sum, t) => sum + t.totalPatients, 0);
     const activeScreenings = mockTherapists.reduce((sum, t) => 
-      sum + t.patients.filter(p => p.status === 'In Progress').length, 0
+      sum + t.patients.filter((p) => p.status !== 'Assessment Complete').length, 0
     );
     const completedScreenings = mockTherapists.reduce((sum, t) => 
-      sum + t.patients.filter(p => p.status === 'Assessment Complete').length, 0
+      sum + t.patients.filter((p) => p.status === 'Assessment Complete').length, 0
     );
-    
     setStats({
       totalTherapists: mockTherapists.length,
       totalPatients,
       activeScreenings,
       completedScreenings
     });
+  };
+
+  const loadAdminData = async () => {
+    try {
+      
+      const response = await fetch(
+        '/api/admin/therapists',
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+  
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.success && data.therapists) {
+          setTherapists(data.therapists || []);
+          
+          // Calculate stats
+          const totalPatients = data.therapists.reduce((sum: number, t: Doctors) => sum + t.totalPatients, 0);
+          const activeScreenings = data.therapists.reduce((sum: number, t: Doctors) => 
+            sum + t.patients.filter((p: Patient) => p.status !== 'Assessment Complete').length, 0
+          );
+          const completedScreenings = data.therapists.reduce((sum: number, t: Doctors) => 
+            sum + t.patients.filter((p: Patient) => p.status === 'Assessment Complete').length, 0
+          );
+          setStats({
+            totalTherapists: data.therapists.length,
+            totalPatients,
+            activeScreenings,
+            completedScreenings
+          });
+        } else {
+          console.error('API returned unsuccessful response:', data);
+          //toast.warning('Failed to load therapists data. Using mock data instead.');
+          loadMockData();
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('API error:', response.status, errorData);
+        //toast.warning('Failed to load data from backend. Using mock data instead.');
+        loadMockData();
+      }
+    } catch (error) {
+      console.error('Error loading admin data:', error);
+      //toast.warning('Failed to connect to backend. Using mock data instead.');
+      loadMockData();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleTherapist = (therapistId: number) => {
@@ -454,11 +465,6 @@ export default function AdminDashboard() {
                                       <span className="text-xs text-gray-500">
                                         Last session: {patient.lastSession}
                                       </span>
-                                      {patient.screeningStage && (
-                                        <span className="text-xs text-gray-500">
-                                          Stage: {patient.screeningStage}
-                                        </span>
-                                      )}
                                     </div>
                                   </div>
                                 </div>

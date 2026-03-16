@@ -2,3 +2,4 @@ node_modules
 src/DATABASE_SCHEMA.md
 .env
 src\utils\supabase\info.tsx
+backend\.env

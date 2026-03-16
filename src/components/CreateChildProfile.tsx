@@ -68,13 +68,13 @@ export default function CreateChildProfile() {
         return;
       }
 
-      if (!data || !data.id) {
+      if (!data || !data.patient_id) {
         toast.error('Failed to save patient: No data returned');
         setIsSaving(false);
         return;
       }
 
-      const childId = data.id;
+      const childId = data.patient_id;
       toast.success('Child profile created successfully');
 
       if (startScreening) {
