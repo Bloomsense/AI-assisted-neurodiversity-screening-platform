@@ -52,9 +52,9 @@ export default function ScreeningResults() {
       setIsSaving(true);
 
       try {
-        const { mchatAnswers, mchatQuestions, behaviorNotes, childId } = results;
+        const { mchatAnswers, mchatQuestions, behaviorNotes, childId, questionnaireType = 'mchat' } = results;
 
-        // Calculate results
+        // Calculate results (for DB summarization we still use basic yes/no logic)
         const convertToPassFail = (answer: string): 'Pass' | 'Fail' => {
           return answer.toLowerCase() === 'no' ? 'Fail' : 'Pass';
         };
@@ -78,6 +78,7 @@ export default function ScreeningResults() {
         // Prepare assessment data
         const assessmentData = {
           patient_id: childId,
+          questionnaire_type: questionnaireType,
           mchat_answers: mchatAnswers,
           mchat_questions: mchatQuestions,
           behavior_notes: behaviorNotes || null,
