@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
 import { Button } from './ui/button';
@@ -9,24 +9,28 @@ import { Label } from './ui/label';
 import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
 import { Avatar, AvatarFallback } from './ui/avatar';
-import { 
-  ArrowLeft, 
-  Users, 
-  Settings, 
-  Download, 
-  Upload,
-  Plus,
-  Trash2,
-  Edit,
-  Shield,
-  Database,
-  FileText,
-  BarChart,
-  Loader2
+import { ArrowLeft, Users, Settings, 
+        Download, Upload,Plus,Trash2,Edit,Shield,
+        Database,FileText,BarChart,Loader2 
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
+import { getApiBaseUrl } from '../config';
+
+interface QuestionnaireQuestion {
+  id: string;
+  text: string;
+  score: number;
+  isCritical: boolean;
+}
+
+interface Questionnaire {
+  id: string;
+  name: string;
+  description?: string;
+  questions: QuestionnaireQuestion[];
+}
 
 export default function AdminSettings() {
   const navigate = useNavigate();
@@ -77,13 +81,14 @@ export default function AdminSettings() {
     }
   ];
 
-  const mchatQuestions = [
-    'Does your child enjoy being swung, bounced on your knee, etc.?',
-    'Does your child take an interest in other children?',
-    'Does your child like climbing on things, such as up stairs?',
-    'Does your child enjoy playing peek-a-boo/hide-and-seek?',
-    'Does your child ever pretend, for example, to talk on the phone or take care of dolls?'
-  ];
+  const [questionnaires, setQuestionnaires] = useState<Questionnaire[]>([]);
+  const [selectedQuestionnaireId, setSelectedQuestionnaireId] = useState('');
+  const [newQuestionnaireName, setNewQuestionnaireName] = useState('');
+  const [newQuestionnaireDescription, setNewQuestionnaireDescription] = useState('');
+  const [newQuestionText, setNewQuestionText] = useState('');
+  const [newQuestionScore, setNewQuestionScore] = useState('1');
+  const [newQuestionCritical, setNewQuestionCritical] = useState(false);
+  const [isLoadingQuestionnaires, setIsLoadingQuestionnaires] = useState(false);
 
   const systemStats = {
     totalChildren: 156,
@@ -283,6 +288,200 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     toast.success(`Therapist status updated to ${newStatus}`);
   };
 
+  type AssessmentToolsOk<T = unknown> = { success: true; data?: T };
+
+  const assessmentToolsRequest = async <T = unknown>(
+    endpoint: string,
+    options?: RequestInit
+  ): Promise<AssessmentToolsOk<T>> => {
+    const base = getApiBaseUrl();
+    const url = `${base}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options?.headers || {}),
+      },
+      ...options,
+    });
+
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    const text = await response.text();
+    const trimmed = text.trim();
+    const looksJson =
+      contentType.includes('application/json') ||
+      contentType.includes('+json') ||
+      trimmed.startsWith('{') ||
+      trimmed.startsWith('[');
+
+    if (!looksJson) {
+      if (trimmed.startsWith('<')) {
+        throw new Error(
+          `HTTP ${response.status}: received HTML instead of JSON. Start the API (e.g. \`npm run dev:api\` on port 3001) and use Vite on 5173 so /api is proxied, or set VITE_API_BASE_URL to your deployed API.`
+        );
+      }
+      if (!trimmed) {
+        throw new Error(
+          `HTTP ${response.status}: empty response (is the API running on port 3001 and Vite proxying /api?).`
+        );
+      }
+      throw new Error(`HTTP ${response.status}: ${trimmed.slice(0, 200)}`);
+    }
+
+    let result: { success?: boolean; error?: string; data?: T };
+    try {
+      result = JSON.parse(text) as typeof result;
+    } catch {
+      throw new Error(`HTTP ${response.status}: response is not valid JSON.`);
+    }
+    if (!response.ok || !result?.success) {
+      throw new Error(result?.error || 'Assessment tools request failed');
+    }
+    return result as AssessmentToolsOk<T>;
+  };
+
+  const fetchQuestionnaires = async () => {
+    setIsLoadingQuestionnaires(true);
+    try {
+      const result = await assessmentToolsRequest<any[]>('/api/assessment-tools/questionnaires');
+      const rows = Array.isArray(result.data) ? result.data : [];
+      const mappedQuestionnaires: Questionnaire[] = rows.map((q: any) => ({
+        id: q.id,
+        name: q.name || 'Untitled Questionnaire',
+        description: q.description || '',
+        questions: (q.questions || []).map((question: any) => ({
+          id: question.question_id,
+          text: question.question_text || '',
+          score: question.max_score ?? 0,
+          isCritical: !!question.critical_item,
+        })),
+      }));
+
+      setQuestionnaires(mappedQuestionnaires);
+      if (mappedQuestionnaires.length > 0) {
+        setSelectedQuestionnaireId((prev) =>
+          mappedQuestionnaires.some((q) => q.id === prev) ? prev : mappedQuestionnaires[0].id
+        );
+      } else {
+        setSelectedQuestionnaireId('');
+      }
+    } catch (error: any) {
+      toast.error(`Failed to load questionnaires: ${error.message}`);
+    } finally {
+      setIsLoadingQuestionnaires(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchQuestionnaires();
+  }, []);
+
+  const selectedQuestionnaire = questionnaires.find((q) => q.id === selectedQuestionnaireId) || null;
+
+  const handleAddQuestionnaire = async () => {
+    const trimmed = newQuestionnaireName.trim();
+    if (!trimmed) {
+      toast.error('Please enter a questionnaire name.');
+      return;
+    }
+
+    const exists = questionnaires.some((q) => q.name.toLowerCase() === trimmed.toLowerCase());
+    if (exists) {
+      toast.error('A questionnaire with this name already exists.');
+      return;
+    }
+
+    try {
+      const code = trimmed
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      const result = await assessmentToolsRequest<{ id: string }>('/api/assessment-tools/questionnaires', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: trimmed,
+          description: newQuestionnaireDescription.trim() || null,
+          code: code || null,
+        }),
+      });
+
+      setNewQuestionnaireName('');
+      setNewQuestionnaireDescription('');
+      toast.success('Questionnaire added.');
+      await fetchQuestionnaires();
+      if (result.data?.id) setSelectedQuestionnaireId(result.data.id);
+    } catch (error: any) {
+      toast.error(`Failed to add questionnaire: ${error.message}`);
+    }
+  };
+
+  const handleDeleteQuestionnaire = async (questionnaireId: string) => {
+    const target = questionnaires.find((q) => q.id === questionnaireId);
+    if (!target) return;
+
+    try {
+      await assessmentToolsRequest(`/api/assessment-tools/questionnaires/${questionnaireId}`, {
+        method: 'DELETE',
+      });
+
+      toast.success(`Deleted questionnaire "${target.name}".`);
+      await fetchQuestionnaires();
+    } catch (error: any) {
+      toast.error(`Failed to delete questionnaire: ${error.message}`);
+    }
+  };
+
+  const handleAddQuestion = async () => {
+    if (!selectedQuestionnaireId) {
+      toast.error('Please select a questionnaire first.');
+      return;
+    }
+
+    const questionText = newQuestionText.trim();
+    if (!questionText) {
+      toast.error('Please enter a question.');
+      return;
+    }
+
+    const score = parseInt(newQuestionScore, 10);
+    if (Number.isNaN(score) || score < 0) {
+      toast.error('Please provide a valid non-negative score.');
+      return;
+    }
+
+    try {
+      await assessmentToolsRequest('/api/assessment-tools/questions', {
+        method: 'POST',
+        body: JSON.stringify({
+          questionnaires_id: selectedQuestionnaireId,
+          question_text: questionText,
+          max_score: score,
+          critical_item: newQuestionCritical,
+        }),
+      });
+
+      setNewQuestionText('');
+      setNewQuestionScore('1');
+      setNewQuestionCritical(false);
+      toast.success('Question added.');
+      await fetchQuestionnaires();
+    } catch (error: any) {
+      toast.error(`Failed to add question: ${error.message}`);
+    }
+  };
+
+  const handleDeleteQuestion = async (questionnaireId: string, questionId: string) => {
+    try {
+      await assessmentToolsRequest(`/api/assessment-tools/questions/${questionId}`, {
+        method: 'DELETE',
+      });
+
+      toast.success('Question removed.');
+      await fetchQuestionnaires();
+    } catch (error: any) {
+      toast.error(`Failed to remove question: ${error.message}`);
+    }
+  };
+
   // Data Import: parse CSV and validate required columns
   const parseCSVFile = (file: File): Promise<Record<string, string>[]> => {
     return new Promise((resolve, reject) => {
@@ -330,12 +529,17 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     try {
       const rows = await parseCSVFile(file);
       const type = importType;
+      let importedPatients = 0;
+      let importedAssessments = 0;
+      let importedSessions = 0;
+      let skippedRows = 0;
+      const importErrors: string[] = [];
 
       // Required columns per import type
-      const patientsRequired = ['hospital_patient_id', 'name', 'age', 'gender', 'caregiver_contact'];
-      const assessmentsRequired = ['hospital_patient_id', 'total_score'];
-      const sessionsRequired = ['hospital_patient_id', 'session_date', 'session_notes'];
-      const fullRequired = ['hospital_patient_id', 'name', 'age', 'gender', 'caregiver_contact', 'total_score', 'session_date', 'session_notes'];
+      const patientsRequired = ['patient_id', 'name', 'age', 'gender', 'caregiver_contact'];
+      const assessmentsRequired = ['patient_id', 'total_score'];
+      const sessionsRequired = ['patient_id', 'session_date', 'session_notes'];
+      const fullRequired = ['patient_id', 'name', 'age', 'gender', 'caregiver_contact', 'total_score', 'session_date', 'session_notes'];
 
       if (type === 'patients') {
         const err = validateRequiredColumns(rows, patientsRequired);
@@ -358,7 +562,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
         const seen = new Set<string>();
         const patientRows = type === 'patients_full'
           ? rows.filter((r) => {
-              const hpId = getRow(r, 'hospital_patient_id');
+              const hpId = getRow(r, 'patient_id');
               if (!hpId || seen.has(hpId)) return false;
               seen.add(hpId);
               return true;
@@ -366,10 +570,10 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
           : rows;
 
         for (const row of patientRows) {
-          const hpId = getRow(row, 'hospital_patient_id');
+          const hpId = getRow(row, 'patient_id');
           const age = parseInt(getRow(row, 'age'), 10);
           const p = {
-            hospital_patient_id: hpId || null,
+            patient_id: hpId || null,
             name: getRow(row, 'name') || 'Unknown',
             age: isNaN(age) ? 0 : age,
             gender: getRow(row, 'gender') || null,
@@ -382,42 +586,87 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
 
           const { data, error } = await supabase
             .from('patients')
-            .upsert(p, { onConflict: 'hospital_patient_id', ignoreDuplicates: false })
-            .select('id, hospital_patient_id')
+            .upsert(p, { onConflict: 'patient_id', ignoreDuplicates: false })
+            .select('id, patient_id')
             .single();
           if (error) {
-            const { data: inserted } = await supabase.from('patients').insert(p).select('id, hospital_patient_id').single();
-            if (inserted && inserted.id && p.hospital_patient_id) {
-              hospitalIdToUuid.set(p.hospital_patient_id, inserted.id);
-            } else throw error;
-          } else if (data?.id && p.hospital_patient_id) {
-            hospitalIdToUuid.set(p.hospital_patient_id, data.id);
+            const { data: inserted, error: insertError } = await supabase
+              .from('patients')
+              .insert(p)
+              .select('id, patient_id')
+              .single();
+            if (inserted && inserted.id && p.patient_id) {
+              hospitalIdToUuid.set(p.patient_id, inserted.id);
+              importedPatients += 1;
+            } else {
+              importErrors.push(insertError?.message || error.message);
+            }
+          } else if (data?.id && p.patient_id) {
+            hospitalIdToUuid.set(p.patient_id, data.id);
+            importedPatients += 1;
           }
         }
       }
 
-      // 2. Build hospital_patient_id -> uuid map (for assessments/sessions - patients must exist)
+      // 2. Build patient_id -> uuid map (for assessments/sessions - patients must exist)
       if (type === 'patients_assessments' || type === 'patients_sessions' || type === 'patients_full') {
         const { data: existing } = await supabase
           .from('patients')
-          .select('id, hospital_patient_id')
-          .not('hospital_patient_id', 'is', null);
-        (existing || []).forEach((p: { id: string; hospital_patient_id: string }) => {
-          hospitalIdToUuid.set(p.hospital_patient_id, p.id);
+          .select('id, patient_id')
+          .not('patient_id', 'is', null);
+        (existing || []).forEach((p: { id: string; patient_id: string }) => {
+          hospitalIdToUuid.set(p.patient_id, p.id);
         });
+
+        // Auto-create missing patients so assessment/session rows can still be imported.
+        const uniqueHospitalIds = new Set(rows.map((r) => getRow(r, 'patient_id')).filter(Boolean));
+        for (const hpId of uniqueHospitalIds) {
+          if (hospitalIdToUuid.has(hpId)) continue;
+
+          const sourceRow = rows.find((r) => getRow(r, 'patient_id') === hpId);
+          const fallbackAge = sourceRow ? parseInt(getRow(sourceRow, 'age'), 10) : NaN;
+          const fallbackPatient = {
+            patient_id: hpId,
+            name: sourceRow ? getRow(sourceRow, 'name') || `Patient ${hpId}` : `Patient ${hpId}`,
+            age: isNaN(fallbackAge) ? 0 : fallbackAge,
+            gender: sourceRow ? getRow(sourceRow, 'gender') || null : null,
+            caregiver_name: sourceRow ? getRow(sourceRow, 'caregiver_name') || getRow(sourceRow, 'caregiver_contact') || 'N/A' : 'N/A',
+            caregiver_contact: sourceRow ? getRow(sourceRow, 'caregiver_contact') || null : null,
+            date_of_birth: sourceRow ? getRow(sourceRow, 'date_of_birth') || null : null,
+            remarks: sourceRow ? getRow(sourceRow, 'remarks') || 'Auto-created during CSV import' : 'Auto-created during CSV import',
+            status: sourceRow ? getRow(sourceRow, 'status') || 'active' : 'active',
+          };
+
+          const { data: created, error: createErr } = await supabase
+            .from('patients')
+            .upsert(fallbackPatient, { onConflict: 'patient_id', ignoreDuplicates: false })
+            .select('id, patient_id')
+            .single();
+
+          if (createErr || !created?.id) {
+            importErrors.push(`Patient auto-create for patient_id "${hpId}" failed: ${createErr?.message || 'Unknown error'}`);
+            continue;
+          }
+
+          hospitalIdToUuid.set(hpId, created.id);
+          importedPatients += 1;
+        }
       }
 
       // 3. Import assessments
       if (type === 'patients_assessments' || type === 'patients_full') {
         for (const row of rows) {
-          const hpId = getRow(row, 'hospital_patient_id');
+          const hpId = getRow(row, 'patient_id');
           const patientId = hospitalIdToUuid.get(hpId);
           if (!patientId) {
-            toast.warning(`Skipping row: no patient found for hospital_patient_id "${hpId}"`);
+            skippedRows += 1;
             continue;
           }
           const totalScore = parseInt(getRow(row, 'total_score'), 10);
-          if (isNaN(totalScore)) continue;
+          if (isNaN(totalScore)) {
+            skippedRows += 1;
+            continue;
+          }
 
           const assessmentData: Record<string, unknown> = {
             patient_id: patientId,
@@ -436,22 +685,29 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
           if (dob) assessmentData.assessment_date = dob;
 
           const { error } = await supabase.from('assessments').insert(assessmentData);
-          if (error) toast.error(`Assessment insert failed: ${error.message}`);
+          if (error) {
+            importErrors.push(`Assessment for patient_id "${hpId}": ${error.message}`);
+          } else {
+            importedAssessments += 1;
+          }
         }
       }
 
       // 4. Import sessions
       if (type === 'patients_sessions' || type === 'patients_full') {
         for (const row of rows) {
-          const hpId = getRow(row, 'hospital_patient_id');
+          const hpId = getRow(row, 'patient_id');
           const patientId = hospitalIdToUuid.get(hpId);
           if (!patientId) {
-            toast.warning(`Skipping row: no patient found for hospital_patient_id "${hpId}"`);
+            skippedRows += 1;
             continue;
           }
           const sessionDate = getRow(row, 'session_date');
           const sessionNotes = getRow(row, 'session_notes');
-          if (!sessionDate || !sessionNotes) continue;
+          if (!sessionDate || !sessionNotes) {
+            skippedRows += 1;
+            continue;
+          }
 
           const sessionData = {
             patient_id: patientId,
@@ -461,11 +717,27 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
             session_status: getRow(row, 'session_status_type') || getRow(row, 'session_status') || null,
           };
           const { error } = await supabase.from('sessions').insert(sessionData);
-          if (error) toast.error(`Session insert failed: ${error.message}`);
+          if (error) {
+            importErrors.push(`Session for patient_id "${hpId}": ${error.message}`);
+          } else {
+            importedSessions += 1;
+          }
         }
       }
 
-      toast.success(`Import complete. Processed ${rows.length} row(s).`);
+      const totalImported = importedPatients + importedAssessments + importedSessions;
+      if (totalImported === 0) {
+        const firstError = importErrors[0];
+        toast.error(firstError ? `Import failed. ${firstError}` : 'Import failed. No records were inserted.');
+      } else {
+        toast.success(
+          `Import complete. Inserted ${importedPatients} patient(s), ${importedAssessments} assessment(s), ${importedSessions} session(s).` +
+          (skippedRows > 0 ? ` Skipped ${skippedRows} row(s).` : '')
+        );
+      }
+      if (importErrors.length > 0) {
+        console.error('CSV import errors:', importErrors);
+      }
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Import failed';
@@ -576,7 +848,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
             <TabsTrigger value="therapists">Therapist Accounts</TabsTrigger>
             <TabsTrigger value="checklists">Assessment Tools</TabsTrigger>
             <TabsTrigger value="data">Data Management</TabsTrigger>
-            <TabsTrigger value="system">System Settings</TabsTrigger>
+            <TabsTrigger value="system">Assign Doctor to Imported Patients</TabsTrigger>
           </TabsList>
 
           {/* Therapist Accounts Tab */}
@@ -631,54 +903,126 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
           <TabsContent value="checklists" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>M-CHAT Question Set</CardTitle>
-                <CardDescription>Manage screening questions and assessment criteria</CardDescription>
+                <CardTitle>Questionnaire Management</CardTitle>
+                <CardDescription>Add questionnaire names, then manage questions with score and critical-item flags</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {mchatQuestions.map((question, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">Question {index + 1}</p>
-                        <p className="text-sm text-gray-600">{question}</p>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Button variant="ghost" size="sm">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Input
+                      placeholder="New questionnaire name"
+                      value={newQuestionnaireName}
+                      onChange={(e) => setNewQuestionnaireName(e.target.value)}
+                    />
+                    <Input
+                      placeholder="Questionnaire details/description"
+                      value={newQuestionnaireDescription}
+                      onChange={(e) => setNewQuestionnaireDescription(e.target.value)}
+                    />
+                    <Button variant="outline" onClick={handleAddQuestionnaire}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Questionnaire
+                    </Button>
+                  </div>
+
+                  {questionnaires.length > 0 && (
+                    <div className="space-y-2">
+                      <Label htmlFor="questionnaireSelect">Select Questionnaire</Label>
+                      <div className="flex gap-2">
+                        <select
+                          id="questionnaireSelect"
+                          className="w-full border rounded-md px-3 py-2 bg-white"
+                          value={selectedQuestionnaireId}
+                          onChange={(e) => setSelectedQuestionnaireId(e.target.value)}
+                        >
+                          {questionnaires.map((questionnaire) => (
+                            <option key={questionnaire.id} value={questionnaire.id}>
+                              {questionnaire.name}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedQuestionnaire && (
+                          <Button
+                            variant="outline"
+                            type="button"
+                            onClick={() => handleDeleteQuestionnaire(selectedQuestionnaire.id)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </Button>
+                        )}
                       </div>
                     </div>
-                  ))}
-                  <Button variant="outline" className="w-full">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add New Question
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+                  )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle>M-CHAT Risk Thresholds</CardTitle>
-                <CardDescription>Configure M-CHAT assessment risk indicators</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="lowRisk">Low Risk Threshold</Label>
-                    <Input id="lowRisk" defaultValue="0-2 red flags" />
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                    <div className="md:col-span-2">
+                      <Label htmlFor="newQuestion">Question</Label>
+                      <Input
+                        id="newQuestion"
+                        placeholder="Enter question text"
+                        value={newQuestionText}
+                        onChange={(e) => setNewQuestionText(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="questionScore">Score</Label>
+                      <Input
+                        id="questionScore"
+                        type="number"
+                        min="0"
+                        value={newQuestionScore}
+                        onChange={(e) => setNewQuestionScore(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between border rounded-md px-3 py-2 h-10">
+                      <Label htmlFor="criticalItem" className="text-sm">Critical Item</Label>
+                      <Switch
+                        id="criticalItem"
+                        checked={newQuestionCritical}
+                        onCheckedChange={setNewQuestionCritical}
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="moderateRisk">Moderate Risk Threshold</Label>
-                    <Input id="moderateRisk" defaultValue="3-5 red flags" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="highRisk">High Risk Threshold</Label>
-                    <Input id="highRisk" defaultValue="6+ red flags" />
-                  </div>
+
+                  <Button variant="outline" className="w-full" onClick={handleAddQuestion}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Question
+                  </Button>
+
+                  {selectedQuestionnaire && (
+                    <div className="space-y-2">
+                      <h4 className="font-medium">{selectedQuestionnaire.name} Questions</h4>
+                      {selectedQuestionnaire.description && (
+                        <p className="text-sm text-gray-600">{selectedQuestionnaire.description}</p>
+                      )}
+                      {selectedQuestionnaire.questions.length === 0 ? (
+                        <p className="text-sm text-gray-500">No questions added yet.</p>
+                      ) : (
+                        selectedQuestionnaire.questions.map((question, index) => (
+                          <div key={question.id} className="flex items-center justify-between p-3 border rounded-lg">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium">Question {index + 1}</p>
+                              <p className="text-sm text-gray-700">{question.text}</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                Score: {question.score} | Critical Item: {question.isCritical ? 'True' : 'False'}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteQuestion(selectedQuestionnaire.id, question.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                  {!isLoadingQuestionnaires && questionnaires.length === 0 && (
+                    <p className="text-sm text-gray-500">No questionnaires found in Supabase. Add one to begin.</p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -761,10 +1105,10 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
                 
                   <ul className="list-disc list-outside ml-4 mt-2 space-y-1">
                     
-                    <li><b>To Import Patient data, enter a valid CSV file with the following columns:</b>  Hospital_patient_id, name, age, gender, caregiver_contact.<br/> Optional fields include: caregiver_name, date_of_birth, remarks, status(active/inactive) </li>
-                    <li><b>To Import Patient data along with Assessment scores, enter a valid CSV file with the following columns:</b> Hospital_patient_id, total_score. <br/> Optional fields include iq_score, notes, risk_level(moderate/high/low)</li> 
-                    <li><b>To Import Patient data along with Session History, enter a valid CSV file with the following columns:</b> Hospital_patient_id, session_date, session_notes. <br/> Optional fields include duration, session_status_type(scheduled/completed/cancelled)</li>
-                    <li><b>To Import Patient data along with Assessment & Session history, enter a valid CSV file with the following columns:</b> Hospital_patient_id, name, age, gender, caregiver_contact, total_score, session_date, session_notes. <br/> Optional fields include as above of all files</li>
+                    <li><b>To Import Patient data, enter a valid CSV file with the following columns:</b>  patient_id, name, age, gender, caregiver_contact.<br/> Optional fields include: caregiver_name, date_of_birth, remarks, status(active/inactive) </li>
+                    <li><b>To Import Patient data along with Assessment scores, enter a valid CSV file with the following columns:</b> patient_id, total_score. <br/> Optional fields include iq_score, notes, risk_level(moderate/high/low)</li> 
+                    <li><b>To Import Patient data along with Session History, enter a valid CSV file with the following columns:</b> patient_id, session_date, session_notes. <br/> Optional fields include duration, session_status_type(scheduled/completed/cancelled)</li>
+                    <li><b>To Import Patient data along with Assessment & Session history, enter a valid CSV file with the following columns:</b> patient_id, name, age, gender, caregiver_contact, total_score, session_date, session_notes. <br/> Optional fields include as above of all files</li>
                   </ul>
 
                 </CardDescription>
@@ -859,72 +1203,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* System Settings Tab */}
-          <TabsContent value="system" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Settings className="h-5 w-5 mr-2" />
-                  System Configuration
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h4 className="font-medium">General Settings</h4>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="autoBackup">Automatic Data Backup</Label>
-                        <Switch id="autoBackup" defaultChecked />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="emailNotifications">Email Notifications</Label>
-                        <Switch id="emailNotifications" defaultChecked />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="aiAnalysis">AI-Powered Analysis</Label>
-                        <Switch id="aiAnalysis" defaultChecked />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="dataRetention">30-Day Data Retention</Label>
-                        <Switch id="dataRetention" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <h4 className="font-medium">Security Settings</h4>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="twoFactor">Two-Factor Authentication</Label>
-                        <Switch id="twoFactor" defaultChecked />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="sessionTimeout">Auto Session Timeout</Label>
-                        <Switch id="sessionTimeout" defaultChecked />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="auditLog">Audit Logging</Label>
-                        <Switch id="auditLog" defaultChecked />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="dataEncryption">Data Encryption</Label>
-                        <Switch id="dataEncryption" defaultChecked />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-6 border-t">
-                  <Button className="w-full">
-                    Save Configuration
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+          </TabsContent>             
         </Tabs>
       </div>
     </div>
