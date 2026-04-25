@@ -1,5 +1,10 @@
+export const API_BASE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
+    ? String(import.meta.env.VITE_API_BASE_URL)
+    : '')
+    .trim()
+    .replace(/\/$/, '');
 
-export const API_BASE_URL = 
-  process.env.NODE_ENV === 'production' 
-    ? 'https://ai-assisted-neurodiversity-screenin-eosin.vercel.app'  // Production backend
-    : 'http://localhost:3000';         // Local development
+export function getApiBaseUrl(): string {
+  return API_BASE_URL;
+}
