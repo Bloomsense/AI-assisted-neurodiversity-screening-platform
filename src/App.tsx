@@ -14,6 +14,7 @@ import TherapistDashboard from "./components/TherapistDashboard";
 import CreateChildProfile from "./components/CreateChildProfile";
 import ScreeningWorkflow from "./components/ScreeningWorkflow";
 import ScreeningResults from "./components/ScreeningResults";
+import QuestionnaireSelection from "./components/QuestionnaireSelection";
 import ChildProfileDetail from "./components/ChildProfileDetail";
 import AdminDashboard from "./components/AdminDashboard";
 import AdminSettings from "./components/AdminSettings";
@@ -55,6 +56,10 @@ export default function App() {
           <Route
             path="/therapist/session/:childId"
             element={<SessionScreen />}
+          />
+          <Route
+            path="/therapist/questionnaire-selection/:childId?"
+            element={<QuestionnaireSelection />}
           />
           <Route
             path="/therapist/screening/:childId?"
