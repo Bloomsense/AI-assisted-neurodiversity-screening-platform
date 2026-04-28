@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
@@ -10,7 +10,8 @@ import { Shield, UserCircle, Headphones } from 'lucide-react';
 import { toast } from 'sonner';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
-
+import { upsertHelpdeskStaffRow } from '../utils/helpdeskProfile';
+import { upsertDoctorRow } from '../utils/doctorProfile';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -20,8 +21,19 @@ export default function LoginPage() {
   const [helpdeskEmail, setHelpdeskEmail] = useState('');
   const [helpdeskPassword, setHelpdeskPassword] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
+  const defaultTab =
+    (location.state as { defaultTab?: string } | null)?.defaultTab === 'helpdesk'
+      ? 'helpdesk'
+      : 'therapist';
+  const [activeTab, setActiveTab] = useState(defaultTab);
 
-const handleTherapistLogin = async (e: React.FormEvent) => {
+  useEffect(() => {
+    const t = (location.state as { defaultTab?: string } | null)?.defaultTab;
+    if (t === 'helpdesk') setActiveTab('helpdesk');
+  }, [location.state]);
+
+  const handleTherapistLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -34,8 +46,23 @@ const handleTherapistLogin = async (e: React.FormEvent) => {
       return;
     }
 
-    toast.success("Logged in successfully");
-    navigate("/therapist/dashboard");
+    if (data.user?.user_metadata?.role === 'helpdesk') {
+      await supabase.auth.signOut();
+      toast.error('This is a help desk account. Use the Help Desk tab to sign in.');
+      return;
+    }
+
+    if (data.user) {
+      const { error: doctorProfileError } = await upsertDoctorRow(data.user);
+      if (doctorProfileError) {
+        toast.warning(
+          'Signed in, but therapist profile sync failed. Run supabase/migrations/auth_profile_sync.sql if not applied.'
+        );
+      }
+    }
+
+    toast.success('Logged in successfully');
+    navigate('/therapist/dashboard');
   };
 
   const handleAdminLogin = (e: React.FormEvent) => {
@@ -49,9 +76,34 @@ const handleTherapistLogin = async (e: React.FormEvent) => {
     }
   };
 
-  const handleHelpdeskLogin = (e: React.FormEvent) => {
+  const handleHelpdeskLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Logged in as help desk staff');
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: helpdeskEmail,
+      password: helpdeskPassword,
+    });
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    const user = data.user;
+    if (user?.user_metadata?.role !== 'helpdesk') {
+      await supabase.auth.signOut();
+      toast.error('This account is not registered as help desk. Use the Therapist tab or sign up under Help desk.');
+      return;
+    }
+
+    const { error: profileError } = await upsertHelpdeskStaffRow(user);
+    if (profileError) {
+      toast.warning(
+        'Signed in, but profile sync failed. Create table and policies from supabase/migrations/helpdesk_staff.sql if you have not already.'
+      );
+    }
+
+    toast.success('Signed in as help desk');
     navigate('/registration/portal');
   };
 
@@ -79,7 +131,7 @@ const handleTherapistLogin = async (e: React.FormEvent) => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="therapist" className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid w-full grid-cols-3 mb-6">
                 <TabsTrigger value="therapist" className="flex items-center gap-2">
                   <UserCircle className="h-4 w-4" />
@@ -227,6 +279,18 @@ const handleTherapistLogin = async (e: React.FormEvent) => {
                     </Button>
                   </div>
                 </form>
+
+                <div className="text-center mt-4">
+                  <span className="text-gray-600">New help desk user? </span>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="text-[#20B2AA] p-0"
+                    asChild
+                  >
+                    <Link to="/signup/helpdesk">Sign up</Link>
+                  </Button>
+                </div>
               </TabsContent>
             </Tabs>
           </CardContent>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -33,52 +33,91 @@ export default function AdminSettings() {
   const [includeScores, setIncludeScores] = useState(true);
   const [includeTimeline, setIncludeTimeline] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [therapistAccounts, setTherapistAccounts] = useState<Array<{
+    id: number;
+    name: string;
+    email: string;
+    role: string;
+    status: string;
+    patients: number;
+    lastLogin: string;
+  }>>([]);
+  const [mchatQuestions, setMchatQuestions] = useState<string[]>([]);
+  const [systemStats, setSystemStats] = useState({
+    totalChildren: 0,
+    totalTherapists: 0,
+    totalCaregivers: 0,
+    completedScreenings: 0,
+    pendingAssessments: 0,
+  });
 
-  const therapistAccounts = [
-    {
-      id: 1,
-      name: 'Dr. Sarah Ahmed',
-      email: 'sarah.ahmed@neurodetect.com',
-      role: 'Senior Therapist',
-      status: 'active',
-      patients: 24,
-      lastLogin: '2024-01-20'
-    },
-    {
-      id: 2,
-      name: 'Dr. Ali Hassan',
-      email: 'ali.hassan@neurodetect.com',
-      role: 'Therapist',
-      status: 'active',
-      patients: 18,
-      lastLogin: '2024-01-19'
-    },
-    {
-      id: 3,
-      name: 'Dr. Fatima Khan',
-      email: 'fatima.khan@neurodetect.com',
-      role: 'Therapist',
-      status: 'inactive',
-      patients: 12,
-      lastLogin: '2024-01-15'
-    }
-  ];
+  useEffect(() => {
+    const loadAdminSettingsData = async () => {
+      const nowIso = new Date().toISOString();
 
-  const mchatQuestions = [
-    'Does your child enjoy being swung, bounced on your knee, etc.?',
-    'Does your child take an interest in other children?',
-    'Does your child like climbing on things, such as up stairs?',
-    'Does your child enjoy playing peek-a-boo/hide-and-seek?',
-    'Does your child ever pretend, for example, to talk on the phone or take care of dolls?'
-  ];
+      const [patientsResult, doctorsResult, caregiversResult, assessmentsResult, pendingSessionsResult] =
+        await Promise.all([
+          supabase.from('patients').select('id', { count: 'exact', head: true }),
+          supabase.from('doctors').select('*'),
+          supabase.from('helpdesk_staff').select('user_id', { count: 'exact', head: true }),
+          supabase.from('assessments').select('id', { count: 'exact', head: true }),
+          supabase
+            .from('appointments')
+            .select('id', { count: 'exact', head: true })
+            .in('status', ['scheduled', 'pending'])
+            .gte('appointment_date', nowIso),
+        ]);
 
-  const systemStats = {
-    totalChildren: 156,
-    totalTherapists: 8,
-    totalCaregivers: 142,
-    completedScreenings: 89,
-    pendingAssessments: 23
-  };
+      if (doctorsResult.error) {
+        console.error('Error loading therapist accounts:', doctorsResult.error);
+        setTherapistAccounts([]);
+      } else {
+        const mappedTherapists = (doctorsResult.data || []).map((doctor: any, index: number) => ({
+          id: index + 1,
+          name: doctor.name || `Doctor ${index + 1}`,
+          email: doctor.email || 'N/A',
+          role: doctor.occupation || 'Therapist',
+          status: doctor.status || 'active',
+          patients: Number(doctor.active_patients) || 0,
+          lastLogin: doctor.last_login
+            ? new Date(doctor.last_login).toISOString().split('T')[0]
+            : 'N/A',
+        }));
+        setTherapistAccounts(mappedTherapists);
+      }
+
+      if (
+        patientsResult.error ||
+        caregiversResult.error ||
+        assessmentsResult.error ||
+        pendingSessionsResult.error
+      ) {
+        console.error('Error loading admin settings stats:', {
+          patients: patientsResult.error,
+          caregivers: caregiversResult.error,
+          assessments: assessmentsResult.error,
+          pendingSessions: pendingSessionsResult.error,
+        });
+      }
+
+      setSystemStats({
+        totalChildren: patientsResult.count ?? 0,
+        totalTherapists: doctorsResult.data?.length ?? 0,
+        totalCaregivers: caregiversResult.count ?? 0,
+        completedScreenings: assessmentsResult.count ?? 0,
+        pendingAssessments: pendingSessionsResult.count ?? 0,
+      });
+
+      const { data: questionsData } = await supabase
+        .from('questionaire')
+        .select('questions')
+        .order('questions_order', { ascending: true });
+
+      setMchatQuestions((questionsData || []).map((q: any) => q.questions).filter(Boolean));
+    };
+
+    loadAdminSettingsData();
+  }, []);
 
   // Fetch patient data from Supabase
   const fetchPatientData = async () => {
@@ -356,32 +395,38 @@ export default function AdminSettings() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {therapistAccounts.map((therapist) => (
-                    <div key={therapist.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="flex items-center space-x-4">
-                        <Avatar>
-                          <AvatarFallback>{therapist.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <h4 className="font-medium">{therapist.name}</h4>
-                          <p className="text-sm text-gray-600">{therapist.email}</p>
-                          <p className="text-sm text-gray-500">{therapist.role} • {therapist.patients} patients</p>
+                  {therapistAccounts.length === 0 ? (
+                    <div className="text-sm text-gray-500 py-6 text-center">
+                      No therapist accounts found in database.
+                    </div>
+                  ) : (
+                    therapistAccounts.map((therapist) => (
+                      <div key={therapist.id} className="flex items-center justify-between p-4 border rounded-lg">
+                        <div className="flex items-center space-x-4">
+                          <Avatar>
+                            <AvatarFallback>{therapist.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <h4 className="font-medium">{therapist.name}</h4>
+                            <p className="text-sm text-gray-600">{therapist.email}</p>
+                            <p className="text-sm text-gray-500">{therapist.role} • {therapist.patients} patients</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <Badge variant={therapist.status === 'active' ? 'default' : 'secondary'}>
+                            {therapist.status}
+                          </Badge>
+                          <Button variant="ghost" size="sm">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Switch
+                            checked={therapist.status === 'active'}
+                            onCheckedChange={() => handleToggleStatus(therapist.id, therapist.status)}
+                          />
                         </div>
                       </div>
-                      <div className="flex items-center space-x-3">
-                        <Badge variant={therapist.status === 'active' ? 'default' : 'secondary'}>
-                          {therapist.status}
-                        </Badge>
-                        <Button variant="ghost" size="sm">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Switch
-                          checked={therapist.status === 'active'}
-                          onCheckedChange={() => handleToggleStatus(therapist.id, therapist.status)}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -396,22 +441,28 @@ export default function AdminSettings() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {mchatQuestions.map((question, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">Question {index + 1}</p>
-                        <p className="text-sm text-gray-600">{question}</p>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Button variant="ghost" size="sm">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                  {mchatQuestions.length === 0 ? (
+                    <div className="text-sm text-gray-500 py-6 text-center">
+                      No assessment questions found in database.
                     </div>
-                  ))}
+                  ) : (
+                    mchatQuestions.map((question, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Question {index + 1}</p>
+                          <p className="text-sm text-gray-600">{question}</p>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Button variant="ghost" size="sm">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                   <Button variant="outline" className="w-full">
                     <Plus className="h-4 w-4 mr-2" />
                     Add New Question

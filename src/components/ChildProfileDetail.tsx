@@ -17,7 +17,6 @@ import {
   Phone, 
   PlayCircle,
   FileText,
-  Lightbulb,
   CheckCircle,
   AlertCircle,
   Clock,
@@ -31,7 +30,7 @@ import {
   Check
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { publicAnonKey, supabaseUrl } from '../utils/supabase/config';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
 export default function ChildProfileDetail() {
@@ -57,10 +56,14 @@ export default function ChildProfileDetail() {
   const [isEditingTag, setIsEditingTag] = useState(false);
   const [tempTag, setTempTag] = useState('');
 
-  // Use local backend in development, cloud backend in production
-  const API_BASE_URL = import.meta.env.DEV 
-    ? 'http://localhost:8000/make-server-8d885905'
-    : `https://${projectId}.supabase.co/functions/v1/make-server-8d885905`;
+  // Node/Deno local server in dev, Supabase Edge in prod unless VITE_BACKEND_API_BASE is set
+  const API_BASE_URL =
+    import.meta.env.VITE_BACKEND_API_BASE ||
+    (import.meta.env.DEV
+      ? 'http://localhost:8000/make-server-8d885905'
+      : supabaseUrl
+        ? `${supabaseUrl.replace(/\/$/, '')}/functions/v1/make-server-8d885905`
+        : '');
 
   // Load comments and meetings on component mount
   useEffect(() => {
@@ -166,48 +169,6 @@ export default function ChildProfileDetail() {
       status: 'created'
     }
   ];
-
-  const recommendations = [
-    {
-      id: 1,
-      category: 'Immediate Actions',
-      priority: 'high',
-      items: [
-        'Schedule follow-up assessment in 3 months',
-        'Refer to speech therapist for communication evaluation',
-        'Begin social skills group therapy'
-      ]
-    },
-    {
-      id: 2,
-      category: 'Home-based Interventions',
-      priority: 'medium',
-      items: [
-        'Implement visual schedules for daily routines',
-        'Practice joint attention activities during play',
-        'Use simple, concrete language during interactions'
-      ]
-    },
-    {
-      id: 3,
-      category: 'Long-term Goals',
-      priority: 'low',
-      items: [
-        'Develop peer interaction skills',
-        'Improve functional communication',
-        'Increase independent daily living skills'
-      ]
-    }
-  ];
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'text-red-600 bg-red-50';
-      case 'medium': return 'text-orange-600 bg-orange-50';
-      case 'low': return 'text-blue-600 bg-blue-50';
-      default: return 'text-gray-600 bg-gray-50';
-    }
-  };
 
   const getRiskBadge = (risk: string) => {
     switch (risk) {
@@ -445,10 +406,9 @@ export default function ChildProfileDetail() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
             <TabsTrigger value="comments">Comments</TabsTrigger>
             <TabsTrigger value="meetings">Follow-Up</TabsTrigger>
           </TabsList>
@@ -616,53 +576,6 @@ export default function ChildProfileDetail() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Recommendations Tab */}
-          <TabsContent value="recommendations">
-            <div className="space-y-6">
-              {recommendations.map((category) => (
-                <Card key={category.id}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <Lightbulb className="h-5 w-5 mr-2" />
-                        {category.category}
-                      </div>
-                      <Badge className={getPriorityColor(category.priority)}>
-                        {category.priority.toUpperCase()} PRIORITY
-                      </Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      {category.items.map((item, index) => (
-                        <li key={index} className="flex items-start space-x-2">
-                          <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-              ))}
-              
-              <Card className="bg-teal-50 border-teal-200">
-                <CardContent className="pt-6">
-                  <div className="flex items-start space-x-3">
-                    <img src={bloomSenseLogo} alt="BloomSense" className="h-6 w-6 mt-1" />
-                    <div>
-                      <h4 className="font-medium text-teal-900 mb-2">AI-Generated Insights</h4>
-                      <p className="text-sm text-teal-800">
-                        Based on the assessment results, Ahmad shows moderate risk indicators. 
-                        Early intervention focusing on communication and social skills is recommended. 
-                        The combination of structured activities and caregiver training should yield positive outcomes.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
 
           {/* Doctor's Comments Tab */}
