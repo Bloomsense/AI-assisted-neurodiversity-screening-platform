@@ -63,6 +63,7 @@
             "dev": "vite",
             "dev:api": "npm --prefix api start",
             "dev:backend": "deno run --allow-net --allow-env --allow-read server.ts",
+            "dev:backend:node": "npm run dev --prefix backend",
             "build": "vite build",
             "preview": "vite preview"
       }
