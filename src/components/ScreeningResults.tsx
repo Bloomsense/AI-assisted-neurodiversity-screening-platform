@@ -20,6 +20,7 @@ interface ScreeningResultsProps {
   mchatQuestions?: MChatQuestion[];
   behaviorNotes?: string;
   childId?: string;
+  questionnaireType?: 'mchat' | 'neurodiversity';
 }
 
 export default function ScreeningResults() {
@@ -51,9 +52,9 @@ export default function ScreeningResults() {
       setIsSaving(true);
 
       try {
-        const { mchatAnswers, mchatQuestions, behaviorNotes, childId } = results;
+        const { mchatAnswers, mchatQuestions, behaviorNotes, childId, questionnaireType = 'mchat' } = results;
 
-        // Calculate results
+        // Calculate results (for DB summarization we still use basic yes/no logic)
         const convertToPassFail = (answer: string): 'Pass' | 'Fail' => {
           return answer.toLowerCase() === 'no' ? 'Fail' : 'Pass';
         };
@@ -77,6 +78,7 @@ export default function ScreeningResults() {
         // Prepare assessment data
         const assessmentData = {
           patient_id: childId,
+          questionnaire_type: questionnaireType,
           mchat_answers: mchatAnswers,
           mchat_questions: mchatQuestions,
           behavior_notes: behaviorNotes || null,
@@ -136,14 +138,29 @@ export default function ScreeningResults() {
     );
   }
 
-  const { mchatAnswers, mchatQuestions, behaviorNotes, childId } = results;
+  const { mchatAnswers, mchatQuestions, behaviorNotes, childId, questionnaireType = 'mchat' } = results;
+  const isMchat = questionnaireType === 'mchat';
+  const assessmentTitle = isMchat ? 'M-CHAT-R/F Screening Results' : 'Neurodiversity Core Screening Results';
+  const assessmentCriteriaLabel = isMchat ? 'M-CHAT-R/F criteria' : 'Neurodiversity Core criteria';
+  const scoringDescription = isMchat
+    ? 'M-CHAT-R/F Scoring: Each item is scored as Pass or Fail. Screen positive if 2 or more items fail.'
+    : 'Neurodiversity Core: Responses are Never, Often, Sometimes, Always. Higher frequency (Often/Always) may indicate areas for follow-up.';
 
-  // Convert Yes/No answers to Pass/Fail based on M-CHAT-R/F logic
-  // For typical M-CHAT questions, "No" indicates risk (Fail), "Yes" indicates no risk (Pass)
+  const formatAnswerDisplay = (answer: string | undefined): string => {
+    if (!answer) return 'Not answered';
+    if (isMchat) return answer;
+    return answer.charAt(0).toUpperCase() + answer.slice(1).toLowerCase();
+  };
+
+  // Convert answers to Pass/Fail for summary and risk
+  // M-CHAT: "No" = risk (Fail), "Yes" = no risk (Pass)
+  // Neurodiversity: "Never" = no concern (Pass), "Often" / "Sometimes" / "Always" = concern (Fail)
   const convertToPassFail = (answer: string): 'Pass' | 'Fail' => {
-    // "No" answer typically indicates a risk factor = Fail
-    // "Yes" answer typically indicates no risk = Pass
-    return answer.toLowerCase() === 'no' ? 'Fail' : 'Pass';
+    if (isMchat) {
+      return answer.toLowerCase() === 'no' ? 'Fail' : 'Pass';
+    }
+    const a = answer.toLowerCase();
+    return a === 'never' ? 'Pass' : a === 'often' || a === 'sometimes' || a === 'always' ? 'Fail' : 'Pass';
   };
 
   // Calculate results
@@ -167,7 +184,8 @@ export default function ScreeningResults() {
 
   const handleDownloadReport = () => {
     // Create a text report
-    const report = `M-CHAT-R/F Screening Results Report
+    const reportTitle = isMchat ? 'M-CHAT-R/F Screening Results Report' : 'Neurodiversity Core Screening Results Report';
+    const report = `${reportTitle}
 Generated: ${new Date().toLocaleString()}
 
 ========================================
@@ -185,7 +203,7 @@ DETAILED RESULTS
 ${passFailResults
   .map(
     (r, idx) => `${idx + 1}. ${r.question.question}
-   Answer: ${r.answer || 'Not answered'}
+   Answer: ${formatAnswerDisplay(r.answer)}
    Result: ${r.result}
 `
   )
@@ -197,8 +215,7 @@ BEHAVIOR OBSERVATIONS
 ${behaviorNotes || 'No behavior observations recorded.'}
 
 ========================================
-© 2009 Diana Robins, Deborah Fein, & Marianne Barton
-M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-Up
+${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-Up' : 'Neurodiversity Core Assessment'}
 `;
 
     // Create blob and download
@@ -206,7 +223,7 @@ M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `M-CHAT-R-F_Results_${new Date().toISOString().split('T')[0]}.txt`;
+    a.download = isMchat ? `M-CHAT-R-F_Results_${new Date().toISOString().split('T')[0]}.txt` : `Neurodiversity_Core_Results_${new Date().toISOString().split('T')[0]}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -231,7 +248,7 @@ M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-
               </Button>
               <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
               <div>
-                <h1 className="text-2xl text-gray-900">M-CHAT-R/F Screening Results</h1>
+                <h1 className="text-2xl text-gray-900">{assessmentTitle}</h1>
                 <p className="text-sm text-gray-600">
                   Assessment completed
                   {isSaving && (
@@ -263,8 +280,8 @@ M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-
           </AlertTitle>
           <AlertDescription className={isScreenPositive ? 'text-red-800' : 'text-green-800'}>
             {isScreenPositive
-              ? `The child has failed ${failCount} out of ${totalQuestions} items. According to M-CHAT-R/F criteria, this indicates a screen positive result. Strongly recommended: referral for early intervention and diagnostic testing.`
-              : `The child has failed ${failCount} out of ${totalQuestions} items. According to M-CHAT-R/F criteria, this indicates a screen negative result. Continue routine developmental monitoring.`}
+              ? `The child has failed ${failCount} out of ${totalQuestions} items. According to ${assessmentCriteriaLabel}, this indicates a screen positive result. Strongly recommended: referral for early intervention and diagnostic testing.`
+              : `The child has failed ${failCount} out of ${totalQuestions} items. According to ${assessmentCriteriaLabel}, this indicates a screen negative result. Continue routine developmental monitoring.`}
           </AlertDescription>
         </Alert>
 
@@ -300,7 +317,7 @@ M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-
           <CardHeader>
             <CardTitle>Detailed Results</CardTitle>
             <p className="text-sm text-gray-600 mt-2">
-              M-CHAT-R/F Scoring: Each item is scored as Pass or Fail. Screen positive if 2 or more items fail.
+              {scoringDescription}
             </p>
           </CardHeader>
           <CardContent>
@@ -321,7 +338,7 @@ M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-
                       </div>
                       <div className="flex items-center gap-4 text-sm">
                         <span className="text-gray-600">
-                          Answer: <span className="font-medium">{item.answer || 'Not answered'}</span>
+                          Answer: <span className="font-medium">{formatAnswerDisplay(item.answer)}</span>
                         </span>
                         <Badge
                           variant={item.result === 'Fail' ? 'destructive' : 'default'}
@@ -377,19 +394,21 @@ M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-
           </div>
         </div>
 
-        {/* Copyright Notice */}
-        <div className="mt-8 text-center text-xs text-gray-500">
-          <p>
-            M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-Up
-          </p>
-          <p>© 2009 Diana Robins, Deborah Fein, & Marianne Barton</p>
-          <p className="mt-1">
-            For more information, visit{' '}
-            <a href="https://www.mchatscreen.com" target="_blank" rel="noopener noreferrer" className="underline">
-              www.mchatscreen.com
-            </a>
-          </p>
-        </div>
+        {/* Copyright Notice - only for M-CHAT */}
+        {isMchat && (
+          <div className="mt-8 text-center text-xs text-gray-500">
+            <p>
+              M-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-Up
+            </p>
+            <p>© 2009 Diana Robins, Deborah Fein, & Marianne Barton</p>
+            <p className="mt-1">
+              For more information, visit{' '}
+              <a href="https://www.mchatscreen.com" target="_blank" rel="noopener noreferrer" className="underline">
+                www.mchatscreen.com
+              </a>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

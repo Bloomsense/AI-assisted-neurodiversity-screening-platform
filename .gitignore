@@ -1,5 +1,7 @@
 node_modules
 src/DATABASE_SCHEMA.md
 .env
+api/.env
 src\utils\supabase\info.tsx
 backend\.env
+supabase\.temp

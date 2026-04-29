@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Progress } from './ui/progress';
@@ -13,6 +13,13 @@ import { supabase } from '../utils/supabase/client';
 
 type ScreeningStage = 1 | 2;
 
+const NEURODIVERSITY_ANSWER_OPTIONS = [
+  { value: 'never', label: 'Never' },
+  { value: 'often', label: 'Often' },
+  { value: 'sometimes', label: 'Sometimes' },
+  { value: 'always', label: 'Always' },
+] as const;
+
 interface MChatQuestion {
   id: string;
   question: string;
@@ -22,6 +29,8 @@ interface MChatQuestion {
 export default function ScreeningWorkflow() {
   const navigate = useNavigate();
   const { childId } = useParams();
+  const [searchParams] = useSearchParams();
+  const questionnaireType = searchParams.get('type') || 'mchat';
   const [currentStage, setCurrentStage] = useState<ScreeningStage>(1);
   const [mchatAnswers, setMchatAnswers] = useState<Record<string, string>>({});
   const [behaviorNotes, setBehaviorNotes] = useState('');
@@ -33,62 +42,43 @@ export default function ScreeningWorkflow() {
     const fetchQuestions = async () => {
       try {
         setLoadingQuestions(true);
-        
-        // Try different possible table names (questionaire first since it exists in the database)
-        const possibleTableNames = ['questionaire', 'questions', 'mchat_questions', 'checklist_questions', 'm_chat_questions'];
+
+        // Decide which table to use based on questionnaire type:
+        // - 'mchat' uses existing M-CHAT questions table
+        // - 'neurodiversity' uses your new neurodiversity_questions table
+        const tableName =
+          questionnaireType === 'neurodiversity'
+            ? 'neurodiversity_questions'
+            : 'questionaire';
+
+        // Fetch all questions for the selected questionnaire
+        const { data, error } = await supabase
+          .from(tableName)
+          .select('*')
+          .order('question_order', { ascending: true });
+
+        if (error) {
+          console.error(`Error querying table ${tableName}:`, error);
+          console.error('Error details:', {
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code,
+          });
+          throw error;
+        }
+
         let questions: MChatQuestion[] = [];
-        let lastError: any = null;
 
-        for (const tableName of possibleTableNames) {
-          // Try querying without order first to see if table exists and is accessible
-          let { data, error } = await supabase
-            .from(tableName)
-            .select('*')
-            .limit(1); // Just check if we can access the table
-          
-          // If basic query works, try with ordering
-          if (!error && data !== null) {
-            // Build query with appropriate ordering based on table structure
-            let query = supabase.from(tableName).select('*');
-            
-            // For questionaire table, use question_order
-            if (tableName === 'questionaire') {
-              query = query.order('question_order', { ascending: true });
-            } else {
-              // For other tables, try order first
-              query = query.order('order', { ascending: true });
-            }
-            
-            const result = await query;
-            data = result.data;
-            error = result.error;
-          }
-
-          if (error) {
-            console.error(`Error querying table ${tableName}:`, error);
-            console.error(`Error details:`, {
-              message: error.message,
-              details: error.details,
-              hint: error.hint,
-              code: error.code
-            });
-            lastError = error;
-            // Continue to next table
-            continue;
-          }
-
-          if (data && data.length > 0) {
-            // Map database records to MChatQuestion format
-            questions = data.map((q: any) => ({
-              id: q.id?.toString() || q.question_id?.toString() || String(q.order || q.question_order || 0),
-              question: q.question || q.question_text || q.text || '',
-              order: q.order || q.question_order || 0
-            }));
-            console.log(`Successfully fetched ${questions.length} questions from table: ${tableName}`);
-            break;
-          } else {
-            console.log(`Table ${tableName} exists but is empty, trying next...`);
-          }
+        if (data && data.length > 0) {
+          questions = data.map((q: any) => ({
+            id: q.id?.toString() || q.question_id?.toString() || String(q.question_order || 0),
+            question: q.question || q.question_text || q.text || '',
+            order: q.question_order || 0,
+          }));
+          console.log(
+            `Successfully fetched ${questions.length} questions from table: ${tableName} for type: ${questionnaireType}`,
+          );
         }
 
         if (questions.length === 0) {
@@ -130,9 +120,11 @@ export default function ScreeningWorkflow() {
     fetchQuestions();
   }, []);
 
+  const questionnaireLabel = questionnaireType === 'neurodiversity' ? 'Neurodiversity Core' : 'M-CHAT';
+
   const getStageTitle = (stage: ScreeningStage) => {
     switch (stage) {
-      case 1: return 'Initial Assessment (M-CHAT)';
+      case 1: return `Initial Assessment (${questionnaireLabel})`;
       case 2: return 'Behavior-Based Assessment';
     }
   };
@@ -166,6 +158,7 @@ export default function ScreeningWorkflow() {
         mchatQuestions,
         behaviorNotes,
         childId,
+        questionnaireType,
       },
     });
   };
@@ -181,7 +174,7 @@ export default function ScreeningWorkflow() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center">
-              <Button variant="ghost" onClick={() => navigate('/therapist/dashboard')} className="mr-4">
+              <Button variant="ghost" onClick={() => navigate(-1)} className="mr-4">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back
               </Button>
@@ -229,7 +222,7 @@ export default function ScreeningWorkflow() {
         {currentStage === 1 && (
           <Card>
             <CardHeader>
-              <CardTitle>M-CHAT Screening Checklist</CardTitle>
+              <CardTitle>{questionnaireLabel} Screening Checklist</CardTitle>
               <p className="text-sm text-gray-600">
                 Please answer each question based on your observations of the child's typical behavior.
               </p>
@@ -255,14 +248,27 @@ export default function ScreeningWorkflow() {
                         value={mchatAnswers[question.id] || ''}
                         onValueChange={(value) => handleMchatAnswer(question.id, value)}
                       >
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="yes" id={`${question.id}-yes`} />
-                          <Label htmlFor={`${question.id}-yes`}>Yes</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="no" id={`${question.id}-no`} />
-                          <Label htmlFor={`${question.id}-no`}>No</Label>
-                        </div>
+                        {questionnaireType === 'neurodiversity' ? (
+                          <div className="flex flex-wrap gap-x-6 gap-y-2">
+                            {NEURODIVERSITY_ANSWER_OPTIONS.map((opt) => (
+                              <div key={opt.value} className="flex items-center space-x-2">
+                                <RadioGroupItem value={opt.value} id={`${question.id}-${opt.value}`} />
+                                <Label htmlFor={`${question.id}-${opt.value}`}>{opt.label}</Label>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="yes" id={`${question.id}-yes`} />
+                              <Label htmlFor={`${question.id}-yes`}>Yes</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="no" id={`${question.id}-no`} />
+                              <Label htmlFor={`${question.id}-no`}>No</Label>
+                            </div>
+                          </>
+                        )}
                       </RadioGroup>
                     </div>
                   ))}
@@ -313,7 +319,7 @@ export default function ScreeningWorkflow() {
                 <h4 className="font-medium text-gray-900 mb-4">Assessment Summary</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   <div>
-                    <p className="text-gray-600">M-CHAT Results</p>
+                    <p className="text-gray-600">{questionnaireLabel} Results</p>
                     <p className="font-medium">{Object.keys(mchatAnswers).length}/{mchatQuestions.length} questions answered</p>
                   </div>
                   <div>

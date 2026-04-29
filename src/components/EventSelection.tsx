@@ -77,7 +77,8 @@ export default function EventSelection() {
 
     // Navigate based on event type
     if (selectedEventType === 'assessment') {
-      navigate(`/therapist/screening/${selectedChild}`);
+      // Go to questionnaire selection first, then into the screening workflow
+      navigate(`/therapist/questionnaire-selection/${selectedChild}`);
     } else if (selectedEventType === 'session') {
       navigate(`/therapist/session/${selectedChild}`);
     }

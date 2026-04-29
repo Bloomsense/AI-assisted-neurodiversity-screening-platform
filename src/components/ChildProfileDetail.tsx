@@ -30,7 +30,8 @@ import {
   Check
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { publicAnonKey, supabaseUrl } from '../utils/supabase/config';
+import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { supabase } from '../utils/supabase/client';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
 export default function ChildProfileDetail() {
@@ -56,20 +57,28 @@ export default function ChildProfileDetail() {
   const [isEditingTag, setIsEditingTag] = useState(false);
   const [tempTag, setTempTag] = useState('');
 
-  // Node/Deno local server in dev, Supabase Edge in prod unless VITE_BACKEND_API_BASE is set
-  const API_BASE_URL =
-    import.meta.env.VITE_BACKEND_API_BASE ||
-    (import.meta.env.DEV
-      ? 'http://localhost:8000/make-server-8d885905'
-      : supabaseUrl
-        ? `${supabaseUrl.replace(/\/$/, '')}/functions/v1/make-server-8d885905`
-        : '');
+  // Latest screening summary
+  const [latestAssessment, setLatestAssessment] = useState<{
+    risk_level: string;
+    screen_positive: boolean;
+    total_questions: number;
+    pass_count: number;
+    fail_count: number;
+    questionnaire_type: string | null;
+    created_at: string;
+  } | null>(null);
 
-  // Load comments and meetings on component mount
+  // Use local backend in development, cloud backend in production
+  const API_BASE_URL = import.meta.env.DEV 
+    ? 'http://localhost:8000/make-server-8d885905'
+    : `https://${projectId}.supabase.co/functions/v1/make-server-8d885905`;
+
+  // Load comments, meetings, and latest assessment on component mount
   useEffect(() => {
     if (childId) {
       loadComments();
       loadMeetings();
+      loadLatestAssessment();
     }
   }, [childId]);
 
@@ -110,6 +119,29 @@ export default function ChildProfileDetail() {
       toast.error('Failed to load meetings');
     } finally {
       setLoadingMeetings(false);
+    }
+  };
+
+  const loadLatestAssessment = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('assessments')
+        .select('risk_level, screen_positive, total_questions, pass_count, fail_count, questionnaire_type, created_at')
+        .eq('patient_id', childId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error loading latest assessment:', error);
+        return;
+      }
+
+      if (data) {
+        setLatestAssessment(data);
+      }
+    } catch (error) {
+      console.error('Error loading latest assessment:', error);
     }
   };
 
@@ -403,6 +435,43 @@ export default function ChildProfileDetail() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Latest Screening Summary */}
+        {latestAssessment && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle>Latest Screening Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-600">Questionnaire</p>
+                  <p className="font-medium">
+                    {latestAssessment.questionnaire_type === 'neurodiversity'
+                      ? 'Neurodiversity Core'
+                      : 'M-CHAT-R/F'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Risk Level</p>
+                  <p className="font-medium">{latestAssessment.risk_level}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Score</p>
+                  <p className="font-medium">
+                    {latestAssessment.pass_count} passed / {latestAssessment.fail_count} failed
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Date</p>
+                  <p className="font-medium">
+                    {new Date(latestAssessment.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
