@@ -1,19 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
-import { projectId, publicAnonKey } from './info';
+import { supabaseUrl, publicAnonKey, isSupabaseConfigured } from './config';
 
-const supabaseUrl = `https://${projectId}.supabase.co`;
+if (!isSupabaseConfigured()) {
+  console.error(
+    '[BloomSense] Missing Supabase env. Copy `.env.example` to `.env` and set VITE_SUPABASE_URL (or VITE_SUPABASE_PROJECT_ID) and VITE_SUPABASE_ANON_KEY.'
+  );
+}
 
-// Log initialization for debugging
-console.log('Initializing Supabase client:', {
-  url: supabaseUrl,
-  hasKey: !!publicAnonKey,
-  keyLength: publicAnonKey?.length
-});
-
-export const supabase = createClient(supabaseUrl, publicAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  publicAnonKey || 'placeholder',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
   }
-});
+);

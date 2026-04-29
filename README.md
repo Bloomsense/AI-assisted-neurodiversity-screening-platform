@@ -7,6 +7,8 @@
 
   Run `npm i` to install the dependencies.
 
+  Copy `.env.example` to `.env` in the project root and set `VITE_SUPABASE_URL` (or `VITE_SUPABASE_PROJECT_ID`) and `VITE_SUPABASE_ANON_KEY` from your [Supabase project API settings](https://supabase.com/dashboard).
+
   Run `npm run dev` to start the development server.
 
   ## Password reset (forgot password)

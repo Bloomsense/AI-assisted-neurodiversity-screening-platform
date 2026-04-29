@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -13,26 +13,57 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
+import { supabase } from '../utils/supabase/client';
 
 type EventType = 'session' | 'assessment' | null;
+type Child = {
+  id: string;
+  name: string;
+  age: number;
+  lastSession: string;
+  status: string;
+};
 
 export default function EventSelection() {
   const navigate = useNavigate();
   const [selectedEventType, setSelectedEventType] = useState<EventType>(null);
-  const [selectedChild, setSelectedChild] = useState<number | null>(null);
+  const [selectedChild, setSelectedChild] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [allChildren, setAllChildren] = useState<Child[]>([]);
 
-  // Mock children data - in real app, this would come from Supabase
-  const allChildren = [
-    { id: 1, name: 'Ahmad Khan', age: 4, lastSession: '2 days ago', status: 'In Progress' },
-    { id: 2, name: 'Fatima Ali', age: 6, lastSession: '1 week ago', status: 'Assessment Complete' },
-    { id: 3, name: 'Hassan Ahmed', age: 3, lastSession: '3 days ago', status: 'Follow-up Needed' },
-    { id: 4, name: 'Aisha Malik', age: 5, lastSession: '5 days ago', status: 'In Progress' },
-    { id: 5, name: 'Omar Hassan', age: 7, lastSession: '1 day ago', status: 'In Progress' },
-    { id: 6, name: 'Zainab Ibrahim', age: 4, lastSession: '3 days ago', status: 'Assessment Complete' },
-    { id: 7, name: 'Ali Mohammed', age: 6, lastSession: '2 weeks ago', status: 'Follow-up Needed' },
-    { id: 8, name: 'Maryam Yusuf', age: 5, lastSession: '4 days ago', status: 'In Progress' },
-  ];
+  useEffect(() => {
+    const fetchChildren = async () => {
+      const { data, error } = await supabase
+        .from('patients')
+        .select('id,name,age,status,last_session_date,updated_at')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading children for event selection:', error);
+        setAllChildren([]);
+        return;
+      }
+
+      const mappedChildren: Child[] = (data || []).map((child: any) => {
+        const sessionDate = child.last_session_date ? new Date(child.last_session_date) : null;
+        const lastSession = sessionDate && !isNaN(sessionDate.getTime())
+          ? sessionDate.toLocaleDateString()
+          : 'No sessions yet';
+
+        return {
+          id: String(child.id),
+          name: child.name || 'Unknown',
+          age: Number(child.age) || 0,
+          lastSession,
+          status: child.status || 'In Progress',
+        };
+      });
+
+      setAllChildren(mappedChildren);
+    };
+
+    fetchChildren();
+  }, []);
 
   // Filter children based on search query
   const filteredChildren = allChildren.filter(child =>

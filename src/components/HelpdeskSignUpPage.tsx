@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
@@ -7,36 +7,32 @@ import { Label } from './ui/label';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
 import { toast } from 'sonner';
-import { upsertDoctorRow } from '../utils/doctorProfile';
+import { upsertHelpdeskStaffRow } from '../utils/helpdeskProfile';
 
-export default function SignUpPage() {
+export default function HelpdeskSignUpPage() {
   const [fullName, setFullName] = useState('');
   const [contactNumber, setContactNumber] = useState('');
-  const [hospitalEmail, setHospitalEmail] = useState('');
+  const [workEmail, setWorkEmail] = useState('');
   const [cnic, setCnic] = useState('');
   const [hospitalBranch, setHospitalBranch] = useState('');
-  const [occupation, setOccupation] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
   const formatCNIC = (value: string) => {
-    // Remove all non-digits
     const digits = value.replace(/\D/g, '');
-    
-    // Format as XXXXX-XXXXXXX-X
     if (digits.length <= 5) {
       return digits;
-    } else if (digits.length <= 12) {
-      return `${digits.slice(0, 5)}-${digits.slice(5)}`;
-    } else {
-      return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12, 13)}`;
     }
+    if (digits.length <= 12) {
+      return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+    }
+    return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12, 13)}`;
   };
 
   const handleCnicChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatCNIC(e.target.value);
-    setCnic(formatted);
+    setCnic(formatCNIC(e.target.value));
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -46,38 +42,50 @@ export default function SignUpPage() {
       toast.error('Passwords do not match');
       return;
     }
-
-    const { data, error } = await supabase.auth.signUp({
-      email: hospitalEmail,
-      password,
-      options: {
-        data: {
-          fullName,
-          contactNumber,
-          cnic,
-          occupation,
-          hospitalBranch,
-          role: 'therapist',
-        },
-      },
-    });
-
-    if (error) {
-      toast.error(error.message);
+    if (password.length < 8) {
+      toast.error('Password must be at least 8 characters');
       return;
     }
 
-    if (data.session?.user) {
-      const { error: profileError } = await upsertDoctorRow(data.session.user);
-      if (profileError) {
-        toast.warning(
-          'Account created, but saving therapist profile failed. Run supabase/migrations/auth_profile_sync.sql and sign in again.'
-        );
-      }
-    }
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: workEmail,
+        password,
+        options: {
+          data: {
+            fullName,
+            contactNumber,
+            cnic,
+            hospitalBranch,
+            role: 'helpdesk',
+          },
+        },
+      });
 
-    toast.success('Registration successful. Please check your email to confirm.');
-    navigate('/login');
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+
+      if (data.session?.user) {
+        const { error: profileError } = await upsertHelpdeskStaffRow(data.session.user);
+        if (profileError) {
+          toast.warning(
+            'Account created, but saving your profile failed. Run supabase/migrations/helpdesk_staff.sql in the Supabase SQL editor, then sign in once to sync.'
+          );
+        }
+      }
+
+      toast.success(
+        data.session
+          ? 'Help desk account ready. You can sign in now.'
+          : 'Registration successful. Please check your email to confirm, then sign in.'
+      );
+      navigate('/login', { state: { defaultTab: 'helpdesk' } });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -88,26 +96,21 @@ export default function SignUpPage() {
             <img src={bloomSenseLogo} alt="BloomSense" className="h-12 w-12 mr-3" />
             <h1 className="text-3xl text-gray-900">BloomSense</h1>
           </div>
-          <p className="text-gray-600">
-            Create your therapist account
-          </p>
+          <p className="text-gray-600">Create your help desk account</p>
         </div>
 
         <Card className="w-full">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Sign Up</CardTitle>
-            <CardDescription>
-              Register as a new therapist to access BloomSense
-            </CardDescription>
+            <CardDescription>Register as help desk staff to access the registration portal</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSignUp}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Full Name */}
                 <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="fullName">Full Name *</Label>
+                  <Label htmlFor="hd-fullName">Full Name *</Label>
                   <Input
-                    id="fullName"
+                    id="hd-fullName"
                     type="text"
                     placeholder="Enter your full name"
                     value={fullName}
@@ -116,11 +119,10 @@ export default function SignUpPage() {
                   />
                 </div>
 
-                {/* Contact Number */}
                 <div className="space-y-2">
-                  <Label htmlFor="contactNumber">Contact Number *</Label>
+                  <Label htmlFor="hd-contactNumber">Contact Number *</Label>
                   <Input
-                    id="contactNumber"
+                    id="hd-contactNumber"
                     type="tel"
                     placeholder="03XX-XXXXXXX"
                     value={contactNumber}
@@ -129,24 +131,22 @@ export default function SignUpPage() {
                   />
                 </div>
 
-                {/* Hospital Email Address */}
                 <div className="space-y-2">
-                  <Label htmlFor="hospitalEmail">Hospital Email Address *</Label>
+                  <Label htmlFor="hd-workEmail">Work Email Address *</Label>
                   <Input
-                    id="hospitalEmail"
+                    id="hd-workEmail"
                     type="email"
-                    placeholder="doctor@hospital.com"
-                    value={hospitalEmail}
-                    onChange={(e) => setHospitalEmail(e.target.value)}
+                    placeholder="helpdesk@hospital.com"
+                    value={workEmail}
+                    onChange={(e) => setWorkEmail(e.target.value)}
                     required
                   />
                 </div>
 
-                {/* CNIC Number */}
                 <div className="space-y-2">
-                  <Label htmlFor="cnic">CNIC No *</Label>
+                  <Label htmlFor="hd-cnic">CNIC No *</Label>
                   <Input
-                    id="cnic"
+                    id="hd-cnic"
                     type="text"
                     placeholder="XXXXX-XXXXXXX-X"
                     value={cnic}
@@ -156,24 +156,10 @@ export default function SignUpPage() {
                   />
                 </div>
 
-                {/* Occupation */}
-                <div className="space-y-2">
-                  <Label htmlFor="occupation">Occupation *</Label>
-                  <Input
-                    id="occupation"
-                    type="text"
-                    placeholder="e.g., Pediatric Therapist"
-                    value={occupation}
-                    onChange={(e) => setOccupation(e.target.value)}
-                    required
-                  />
-                </div>
-
-                {/* Hospital branch */}
                 <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="hospitalBranch">Hospital branch *</Label>
+                  <Label htmlFor="hd-hospitalBranch">Hospital branch *</Label>
                   <Input
-                    id="hospitalBranch"
+                    id="hd-hospitalBranch"
                     type="text"
                     placeholder="e.g. Main campus, North wing"
                     value={hospitalBranch}
@@ -182,11 +168,10 @@ export default function SignUpPage() {
                   />
                 </div>
 
-                {/* Password */}
                 <div className="space-y-2">
-                  <Label htmlFor="password">Password *</Label>
+                  <Label htmlFor="hd-password">Password *</Label>
                   <Input
-                    id="password"
+                    id="hd-password"
                     type="password"
                     placeholder="Create a password"
                     value={password}
@@ -196,11 +181,10 @@ export default function SignUpPage() {
                   />
                 </div>
 
-                {/* Confirm Password */}
                 <div className="space-y-2">
-                  <Label htmlFor="confirmPassword">Confirm Password *</Label>
+                  <Label htmlFor="hd-confirmPassword">Confirm Password *</Label>
                   <Input
-                    id="confirmPassword"
+                    id="hd-confirmPassword"
                     type="password"
                     placeholder="Confirm your password"
                     value={confirmPassword}
@@ -212,19 +196,20 @@ export default function SignUpPage() {
               </div>
 
               <div className="mt-6 space-y-4">
-                <Button type="submit" className="w-full bg-[#20B2AA] hover:bg-[#1a9d96]">
-                  Sign Up
+                <Button
+                  type="submit"
+                  className="w-full bg-[#20B2AA] hover:bg-[#1a9d96]"
+                  disabled={submitting}
+                >
+                  {submitting ? 'Signing up…' : 'Sign Up'}
                 </Button>
-                
+
                 <div className="text-center">
                   <span className="text-gray-600">Already have an account? </span>
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="text-[#20B2AA] p-0"
-                    onClick={() => navigate('/')}
-                  >
-                    Sign In
+                  <Button type="button" variant="link" className="text-[#20B2AA] p-0" asChild>
+                    <Link to="/login" state={{ defaultTab: 'helpdesk' }}>
+                      Sign In
+                    </Link>
                   </Button>
                 </div>
               </div>
