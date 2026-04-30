@@ -257,9 +257,9 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
   };
 
   const mapTherapist = (row: any): TherapistAccount => ({
-    doctor_id: row.doctor_id,
+    employee_id: String(row.employee_id || ''),
     name: row.name || 'Unknown',
-    email: row.user_id || 'N/A',
+    email: row.email || 'N/A',
     role: row.occupation || 'Therapist',
     status: row.status || 'active',
     patients: row.active_patients || 0,
@@ -269,7 +269,27 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     try {
       const result = await assessmentToolsRequest<any[]>('/api/therapists');
       const rows = Array.isArray(result.data) ? result.data : [];
-      setTherapistAccounts(rows.map(mapTherapist));
+      const mapped = rows.map(mapTherapist);
+
+      // Keep patient numbers accurate by counting assignments from patients table.
+      const { data: patientsData, error: patientsError } = await supabase
+        .from('patients')
+        .select('assigned_doctor_id');
+      if (patientsError) throw patientsError;
+
+      const patientCounts: Record<string, number> = {};
+      (patientsData || []).forEach((p: any) => {
+        const key = String( p.assigned_doctor_id || '').trim();
+        if (!key) return;
+        patientCounts[key] = (patientCounts[key] || 0) + 1;
+      });
+
+      setTherapistAccounts(
+        mapped.map((t) => ({
+          ...t,
+          patients: patientCounts[t.employee_id] ?? t.patients ?? 0,
+        }))
+      );
     } catch (error: any) {
       toast.error(`Failed to load therapist accounts: ${error.message}`);
     }
@@ -292,15 +312,15 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     toast.info('Add therapist form will be added next.');
   };
 
-  const handleToggleStatus = async (doctorId: string, currentStatus: string) => {
+  const handleToggleStatus = async (employeeId: string, currentStatus: string) => {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
     try {
-      await assessmentToolsRequest(`/api/therapists/${doctorId}/status`, {
+      await assessmentToolsRequest(`/api/therapists/${employeeId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status: newStatus }),
       });
       setTherapistAccounts((prev) =>
-        prev.map((t) => (t.doctor_id === doctorId ? { ...t, status: newStatus } : t))
+        prev.map((t) => (t.employee_id === employeeId ? { ...t, status: newStatus } : t))
       );
       toast.success(`Therapist status updated to ${newStatus}`);
     } catch (error: any) {

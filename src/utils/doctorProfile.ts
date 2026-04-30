@@ -11,25 +11,64 @@ export async function upsertDoctorRow(user: User): Promise<{ error: Error | null
     return { error: null };
   }
 
-  const row = {
+  const baseName = (meta.fullName as string) || user.email || 'Therapist';
+  const baseContact = (meta.contactNumber as string) || null;
+  const baseOccupation = (meta.occupation as string) || null;
+  const baseBranch =
+    (meta.branch_name as string) ||
+    (meta.hospitalBranch as string) ||
+    (meta.hospital_branch as string) ||
+    (meta.address as string) ||
+    null;
+  const baseEmployeeId = (meta.employeeId as string) || null;
+
+  // Preferred/current schema from doctors table editor.
+  const modernRow = {
+    employee_id: baseEmployeeId,
+    user_id: user.id,
+    name: baseName,
+    contact_number: baseContact,
+    occupation: baseOccupation,
+    branch_name: baseBranch,
+    active_patients: 0,
+    upcoming_sessions: 0,
+    pending_assignments: 0,
+    status: 'active',
+  };
+
+  // Try robust "update-or-insert by user_id" to avoid hard dependency on a unique constraint.
+  const { data: existingByUserId, error: existingError } = await supabase
+    .from('doctors')
+    .select('user_id')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (!existingError) {
+    const writeResult = existingByUserId
+      ? await supabase.from('doctors').update(modernRow).eq('user_id', user.id)
+      : await supabase.from('doctors').insert(modernRow);
+
+    if (!writeResult.error) {
+      return { error: null };
+    }
+  }
+
+  // Fallback for older doctors schema kept in some environments.
+  const legacyRow = {
     doctor_id: user.id,
     user_id: user.id,
-    name: (meta.fullName as string) || user.email || 'Therapist',
+    name: baseName,
     email: user.email ?? '',
-    contact_number: (meta.contactNumber as string) || null,
+    contact_number: baseContact,
     cnic: (meta.cnic as string) || null,
-    occupation: (meta.occupation as string) || null,
-    hospital_branch:
-      (meta.hospitalBranch as string) ||
-      (meta.hospital_branch as string) ||
-      (meta.address as string) ||
-      null,
+    occupation: baseOccupation,
+    hospital_branch: baseBranch,
     status: 'active',
     last_login: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase.from('doctors').upsert(row, {
+  const { error } = await supabase.from('doctors').upsert(legacyRow, {
     onConflict: 'doctor_id',
   });
 

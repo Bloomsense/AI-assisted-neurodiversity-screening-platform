@@ -11,6 +11,7 @@ import { upsertDoctorRow } from '../utils/doctorProfile';
 
 export default function SignUpPage() {
   const [fullName, setFullName] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
   const [contactNumber, setContactNumber] = useState('');
   const [hospitalEmail, setHospitalEmail] = useState('');
   const [cnic, setCnic] = useState('');
@@ -53,6 +54,7 @@ export default function SignUpPage() {
       options: {
         data: {
           fullName,
+          employeeId,
           contactNumber,
           cnic,
           occupation,
@@ -67,8 +69,9 @@ export default function SignUpPage() {
       return;
     }
 
-    if (data.session?.user) {
-      const { error: profileError } = await upsertDoctorRow(data.session.user);
+    const authUser = data.user ?? data.session?.user ?? null;
+    if (authUser) {
+      const { error: profileError } = await upsertDoctorRow(authUser);
       if (profileError) {
         toast.warning(
           'Account created, but saving therapist profile failed. Run supabase/migrations/auth_profile_sync.sql and sign in again.'
@@ -112,6 +115,19 @@ export default function SignUpPage() {
                     placeholder="Enter your full name"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                {/* EmployeeId */}
+                <div className="space-y-2">
+                  <Label htmlFor="employeeId">Employee Id *</Label>
+                  <Input
+                    id="employeeId"
+                    type="text"
+                    placeholder='Enter your Hosiptal Id'
+                    value={employeeId}
+                    onChange={(e) => setEmployeeId(e.target.value)}
                     required
                   />
                 </div>
@@ -175,7 +191,7 @@ export default function SignUpPage() {
                   <Input
                     id="hospitalBranch"
                     type="text"
-                    placeholder="e.g. Main campus, North wing"
+                    placeholder="e.g. Main campus, North wing ,Clifton Branch"
                     value={hospitalBranch}
                     onChange={(e) => setHospitalBranch(e.target.value)}
                     required
