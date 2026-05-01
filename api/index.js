@@ -6,6 +6,7 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { registerTherapistAccountRoutes } = require('./therapistAccounts');
 const { registerDataImportRoutes } = require('./dataImport');
+const { registerPatientAssignmentRoutes } = require('./patientAssignments');
 
 const app = express();
 
@@ -105,6 +106,13 @@ registerTherapistAccountRoutes({
 });
 
 registerDataImportRoutes({
+  app,
+  requireSupabase,
+  sendJson,
+  getSupabase: () => supabase,
+});
+
+registerPatientAssignmentRoutes({
   app,
   requireSupabase,
   sendJson,
