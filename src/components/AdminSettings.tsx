@@ -621,215 +621,32 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     setIsImporting(true);
     try {
       const rows = await parseCSVFile(file);
-      const type = importType;
-      let importedPatients = 0;
-      let importedAssessments = 0;
-      let importedSessions = 0;
-      let skippedRows = 0;
-      const importErrors: string[] = [];
+      const result = await assessmentToolsRequest<{
+        importedPatients: number;
+        importedAssessments: number;
+        importedSessions: number;
+        skippedRows: number;
+      }>('/api/data-import', {
+        method: 'POST',
+        body: JSON.stringify({
+          importType,
+          rows,
+        }),
+      });
 
-      // Required columns per import type
-      const patientsRequired = ['patient_id', 'name', 'age', 'gender', 'caregiver_contact'];
-      const assessmentsRequired = ['patient_id', 'total_score'];
-      const sessionsRequired = ['patient_id', 'session_date', 'session_notes'];
-      const fullRequired = ['patient_id', 'name', 'age', 'gender', 'caregiver_contact', 'total_score', 'session_date', 'session_notes'];
-
-      if (type === 'patients') {
-        const err = validateRequiredColumns(rows, patientsRequired);
-        if (err) { toast.error(err); return; }
-      } else if (type === 'patients_assessments') {
-        const err = validateRequiredColumns(rows, assessmentsRequired);
-        if (err) { toast.error(err); return; }
-      } else if (type === 'patients_sessions') {
-        const err = validateRequiredColumns(rows, sessionsRequired);
-        if (err) { toast.error(err); return; }
-      } else {
-        const err = validateRequiredColumns(rows, fullRequired);
-        if (err) { toast.error(err); return; }
-      }
-
-      const hospitalIdToUuid = new Map<string, string>();
-
-      // 1. Import patients (when type includes patient data)
-      if (type === 'patients' || type === 'patients_full') {
-        const seen = new Set<string>();
-        const patientRows = type === 'patients_full'
-          ? rows.filter((r) => {
-              const hpId = getRow(r, 'patient_id');
-              if (!hpId || seen.has(hpId)) return false;
-              seen.add(hpId);
-              return true;
-            })
-          : rows;
-
-        for (const row of patientRows) {
-          const hpId = getRow(row, 'patient_id');
-          const age = parseInt(getRow(row, 'age'), 10);
-          const p = {
-            patient_id: hpId || null,
-            name: getRow(row, 'name') || 'Unknown',
-            age: isNaN(age) ? 0 : age,
-            gender: getRow(row, 'gender') || null,
-            caregiver_name: getRow(row, 'caregiver_name') || getRow(row, 'caregiver_contact') || 'N/A',
-            caregiver_contact: getRow(row, 'caregiver_contact') || null,
-            date_of_birth: getRow(row, 'date_of_birth') || null,
-            remarks: getRow(row, 'remarks') || null,
-            status: getRow(row, 'status') || 'active',
-          };
-
-          const { data, error } = await supabase
-            .from('patients')
-            .upsert(p, { onConflict: 'patient_id', ignoreDuplicates: false })
-            .select('id, patient_id')
-            .single();
-          if (error) {
-            const { data: inserted, error: insertError } = await supabase
-              .from('patients')
-              .insert(p)
-              .select('id, patient_id')
-              .single();
-            if (inserted && inserted.id && p.patient_id) {
-              hospitalIdToUuid.set(p.patient_id, inserted.id);
-              importedPatients += 1;
-            } else {
-              importErrors.push(insertError?.message || error.message);
-            }
-          } else if (data?.id && p.patient_id) {
-            hospitalIdToUuid.set(p.patient_id, data.id);
-            importedPatients += 1;
-          }
-        }
-      }
-
-      // 2. Build patient_id -> uuid map (for assessments/sessions - patients must exist)
-      if (type === 'patients_assessments' || type === 'patients_sessions' || type === 'patients_full') {
-        const { data: existing } = await supabase
-          .from('patients')
-          .select('id, patient_id')
-          .not('patient_id', 'is', null);
-        (existing || []).forEach((p: { id: string; patient_id: string }) => {
-          hospitalIdToUuid.set(p.patient_id, p.id);
-        });
-
-        // Auto-create missing patients so assessment/session rows can still be imported.
-        const uniqueHospitalIds = new Set(rows.map((r) => getRow(r, 'patient_id')).filter(Boolean));
-        for (const hpId of uniqueHospitalIds) {
-          if (hospitalIdToUuid.has(hpId)) continue;
-
-          const sourceRow = rows.find((r) => getRow(r, 'patient_id') === hpId);
-          const fallbackAge = sourceRow ? parseInt(getRow(sourceRow, 'age'), 10) : NaN;
-          const fallbackPatient = {
-            patient_id: hpId,
-            name: sourceRow ? getRow(sourceRow, 'name') || `Patient ${hpId}` : `Patient ${hpId}`,
-            age: isNaN(fallbackAge) ? 0 : fallbackAge,
-            gender: sourceRow ? getRow(sourceRow, 'gender') || null : null,
-            caregiver_name: sourceRow ? getRow(sourceRow, 'caregiver_name') || getRow(sourceRow, 'caregiver_contact') || 'N/A' : 'N/A',
-            caregiver_contact: sourceRow ? getRow(sourceRow, 'caregiver_contact') || null : null,
-            date_of_birth: sourceRow ? getRow(sourceRow, 'date_of_birth') || null : null,
-            remarks: sourceRow ? getRow(sourceRow, 'remarks') || 'Auto-created during CSV import' : 'Auto-created during CSV import',
-            status: sourceRow ? getRow(sourceRow, 'status') || 'active' : 'active',
-          };
-
-          const { data: created, error: createErr } = await supabase
-            .from('patients')
-            .upsert(fallbackPatient, { onConflict: 'patient_id', ignoreDuplicates: false })
-            .select('id, patient_id')
-            .single();
-
-          if (createErr || !created?.id) {
-            importErrors.push(`Patient auto-create for patient_id "${hpId}" failed: ${createErr?.message || 'Unknown error'}`);
-            continue;
-          }
-
-          hospitalIdToUuid.set(hpId, created.id);
-          importedPatients += 1;
-        }
-      }
-
-      // 3. Import assessments
-      if (type === 'patients_assessments' || type === 'patients_full') {
-        for (const row of rows) {
-          const hpId = getRow(row, 'patient_id');
-          const patientId = hospitalIdToUuid.get(hpId);
-          if (!patientId) {
-            skippedRows += 1;
-            continue;
-          }
-          const totalScore = parseInt(getRow(row, 'total_score'), 10);
-          if (isNaN(totalScore)) {
-            skippedRows += 1;
-            continue;
-          }
-
-          const assessmentData: Record<string, unknown> = {
-            patient_id: patientId,
-            total_score: totalScore,
-            iq_score: getRow(row, 'iq_score') ? parseInt(getRow(row, 'iq_score'), 10) : null,
-            notes: getRow(row, 'notes') || null,
-            risk_level: getRow(row, 'risk_level') || 'low',
-            mchat_answers: {},
-            mchat_questions: [],
-            total_questions: 0,
-            pass_count: 0,
-            fail_count: 0,
-            screen_positive: false,
-          };
-          const dob = getRow(row, 'date_of_birth') || getRow(row, 'assessment_date');
-          if (dob) assessmentData.assessment_date = dob;
-
-          const { error } = await supabase.from('assessments').insert(assessmentData);
-          if (error) {
-            importErrors.push(`Assessment for patient_id "${hpId}": ${error.message}`);
-          } else {
-            importedAssessments += 1;
-          }
-        }
-      }
-
-      // 4. Import sessions
-      if (type === 'patients_sessions' || type === 'patients_full') {
-        for (const row of rows) {
-          const hpId = getRow(row, 'patient_id');
-          const patientId = hospitalIdToUuid.get(hpId);
-          if (!patientId) {
-            skippedRows += 1;
-            continue;
-          }
-          const sessionDate = getRow(row, 'session_date');
-          const sessionNotes = getRow(row, 'session_notes');
-          if (!sessionDate || !sessionNotes) {
-            skippedRows += 1;
-            continue;
-          }
-
-          const sessionData = {
-            patient_id: patientId,
-            session_date: sessionDate,
-            session_notes: sessionNotes,
-            duration: getRow(row, 'duration') ? parseInt(getRow(row, 'duration'), 10) : null,
-            session_status: getRow(row, 'session_status_type') || getRow(row, 'session_status') || null,
-          };
-          const { error } = await supabase.from('sessions').insert(sessionData);
-          if (error) {
-            importErrors.push(`Session for patient_id "${hpId}": ${error.message}`);
-          } else {
-            importedSessions += 1;
-          }
-        }
-      }
-
+      const importedPatients = result.data?.importedPatients ?? 0;
+      const importedAssessments = result.data?.importedAssessments ?? 0;
+      const importedSessions = result.data?.importedSessions ?? 0;
+      const skippedRows = result.data?.skippedRows ?? 0;
       const totalImported = importedPatients + importedAssessments + importedSessions;
+
       if (totalImported === 0) {
-        const firstError = importErrors[0];
-        toast.error(firstError ? `Import failed. ${firstError}` : 'Import failed. No records were inserted.');
+        toast.error('Import failed. No records were inserted.');
       } else {
         toast.success(
           `Import complete. Inserted ${importedPatients} patient(s), ${importedAssessments} assessment(s), ${importedSessions} session(s).` +
-          (skippedRows > 0 ? ` Skipped ${skippedRows} row(s).` : '')
+            (skippedRows > 0 ? ` Skipped ${skippedRows} row(s).` : '')
         );
-      }
-      if (importErrors.length > 0) {
-        console.error('CSV import errors:', importErrors);
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: unknown) {
