@@ -4,8 +4,9 @@
 function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSupabase }) {
   const TABLE = 'doctors';
   const SELECT_COLUMNS = [
-    'doctor_id',
+    'employee_id',
     'user_id',
+    'email',
     'name',
     'contact_number',
     'occupation',
@@ -50,6 +51,7 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
       const {
         user_id,
         name,
+        email,
         contact_number,
         occupation,
         branch_name,
@@ -70,6 +72,7 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
       const payload = {
         user_id: String(user_id).trim(),
         name: String(name).trim(),
+        email: String(email).trim(),
         contact_number: String(contact_number).trim(),
         occupation: String(occupation).trim(),
         branch_name: String(branch_name).trim(),
@@ -93,14 +96,15 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
   });
 
   // Update therapist account details
-  app.patch('/api/therapists/:doctorId', async (req, res) => {
+  app.patch('/api/therapists/:employeeId', async (req, res) => {
     if (!requireSupabase(res)) return;
     const supabase = getSupabase();
-    const { doctorId } = req.params;
+    const { employeeId } = req.params;
 
     try {
       const {
         name,
+        email,
         contact_number,
         occupation,
         branch_name,
@@ -112,6 +116,7 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
 
       const updates = {};
       if (name !== undefined) updates.name = String(name).trim();
+      if (email !== undefined) updates.email = String(email).trim();
       if (contact_number !== undefined) updates.contact_number = String(contact_number).trim();
       if (occupation !== undefined) updates.occupation = String(occupation).trim();
       if (branch_name !== undefined) updates.branch_name = String(branch_name).trim();
@@ -131,7 +136,7 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
       const { data, error } = await supabase
         .from(TABLE)
         .update(updates)
-        .eq('doctor_id', doctorId)
+        .eq('employee_id', employeeId)
         .select(SELECT_COLUMNS)
         .single();
 
@@ -143,10 +148,10 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
   });
 
   // Toggle/update therapist status only
-  app.patch('/api/therapists/:doctorId/status', async (req, res) => {
+  app.patch('/api/therapists/:employeeId/status', async (req, res) => {
     if (!requireSupabase(res)) return;
     const supabase = getSupabase();
-    const { doctorId } = req.params;
+    const { employeeId } = req.params;
 
     try {
       const normalizedStatus = normalizeStatus(req.body?.status);
@@ -155,7 +160,7 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
       const { data, error } = await supabase
         .from(TABLE)
         .update({ status: normalizedStatus })
-        .eq('doctor_id', doctorId)
+        .eq('employee_id', employeeId)
         .select(SELECT_COLUMNS)
         .single();
 
@@ -167,16 +172,16 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
   });
 
   // Delete therapist account row
-  app.delete('/api/therapists/:doctorId', async (req, res) => {
+  app.delete('/api/therapists/:employeeId', async (req, res) => {
     if (!requireSupabase(res)) return;
     const supabase = getSupabase();
-    const { doctorId } = req.params;
+    const { employeeId } = req.params;
 
     try {
       const { error } = await supabase
         .from(TABLE)
         .delete()
-        .eq('doctor_id', doctorId);
+        .eq('employee_id', employeeId);
 
       if (error) return sendJson(res, 500, { success: false, error: error.message });
       return sendJson(res, 200, { success: true });

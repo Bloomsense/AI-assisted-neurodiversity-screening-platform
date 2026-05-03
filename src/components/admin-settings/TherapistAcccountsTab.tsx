@@ -7,7 +7,7 @@ import { Switch } from '../ui/switch';
 import { Edit, Plus } from 'lucide-react';
 
 export interface TherapistAccount {
-  doctor_id: string;
+  employee_id: string;
   name: string;
   email: string;
   role: string;
@@ -39,7 +39,7 @@ export default function TherapistAcccountsTab({
       <CardContent>
         <div className="space-y-4">
           {therapistAccounts.map((therapist) => (
-            <div key={therapist.doctor_id} className="flex items-center justify-between p-4 border rounded-lg">
+            <div key={therapist.employee_id} className="flex items-center justify-between p-4 border rounded-lg">
               <div className="flex items-center space-x-4">
                 <Avatar>
                   <AvatarFallback>{therapist.name.split(' ').map((n) => n[0]).join('')}</AvatarFallback>
@@ -59,7 +59,7 @@ export default function TherapistAcccountsTab({
                 </Button>
                 <Switch
                   checked={therapist.status === 'active'}
-                  onCheckedChange={() => onToggleStatus(therapist.doctor_id, therapist.status)}
+                  onCheckedChange={() => onToggleStatus(therapist.employee_id, therapist.status)}
                 />
               </div>
             </div>
