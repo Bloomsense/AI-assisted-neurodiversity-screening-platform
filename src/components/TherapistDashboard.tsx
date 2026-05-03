@@ -27,6 +27,27 @@ import { supabase } from "../utils/supabase/client";
 export default function TherapistDashboard() {
   const navigate = useNavigate();
   const [therapistDisplayName, setTherapistDisplayName] = useState<string>("Dr");
+  const [therapistUserId, setTherapistUserId] = useState<string | null>(null);
+  const [overviewStats, setOverviewStats] = useState([
+    {
+      title: "Active Child Profiles",
+      value: "0",
+      icon: Users,
+      color: "text-teal-600",
+    },
+    {
+      title: "Pending Sessions",
+      value: "0",
+      icon: Calendar,
+      color: "text-orange-600",
+    },
+  ]);
+  const [recentNotifications, setRecentNotifications] = useState<
+    Array<{ id: number; type: string; child: string; message: string; time: string; patientId?: string }>
+  >([]);
+  const [recentChildren, setRecentChildren] = useState<
+    Array<{ id: string; name: string; age: number; lastSession: string; status: string }>
+  >([]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -34,8 +55,98 @@ export default function TherapistDashboard() {
       const fullName = (user.user_metadata?.fullName as string) || user.email?.split("@")[0] || "";
       const firstName = fullName.trim().split(/\s+/)[0] || "Therapist";
       setTherapistDisplayName(firstName ? `Dr. ${firstName}` : "Dr");
+      setTherapistUserId(user.id);
     });
   }, []);
+
+  useEffect(() => {
+    const fetchDashboardStats = async () => {
+      if (!therapistUserId) return;
+
+      const nowIso = new Date().toISOString();
+
+      const [patientsResult, pendingSessionsResult, upcomingAppointmentsResult, recentChildrenResult] =
+        await Promise.all([
+        supabase
+          .from("patients")
+          .select("id", { count: "exact", head: true })
+          .eq("assigned_doctor_id", therapistUserId),
+        supabase
+          .from("appointments")
+          .select("id", { count: "exact", head: true })
+          .eq("doctor_id", therapistUserId)
+          .in("status", ["scheduled", "pending"])
+          .gte("appointment_date", nowIso),
+        supabase
+          .from("appointments")
+          .select("id,patient_id,patient_name,appointment_date,status")
+          .eq("doctor_id", therapistUserId)
+          .in("status", ["scheduled", "pending"])
+          .gte("appointment_date", nowIso)
+          .order("appointment_date", { ascending: true })
+          .limit(5),
+        supabase
+          .from("patients")
+          .select("id,name,age,updated_at,status")
+          .eq("assigned_doctor_id", therapistUserId)
+          .order("updated_at", { ascending: false })
+          .limit(5),
+      ]);
+
+      if (patientsResult.error) {
+        console.error("Error loading patient stats:", patientsResult.error);
+      }
+
+      if (pendingSessionsResult.error) {
+        console.error("Error loading pending sessions stats:", pendingSessionsResult.error);
+      }
+      if (upcomingAppointmentsResult.error) {
+        console.error("Error loading therapist notifications:", upcomingAppointmentsResult.error);
+      }
+      if (recentChildrenResult.error) {
+        console.error("Error loading recent child profiles:", recentChildrenResult.error);
+      }
+
+      setOverviewStats([
+        {
+          title: "Active Child Profiles",
+          value: String(patientsResult.count ?? 0),
+          icon: Users,
+          color: "text-teal-600",
+        },
+        {
+          title: "Pending Sessions",
+          value: String(pendingSessionsResult.count ?? 0),
+          icon: Calendar,
+          color: "text-orange-600",
+        },
+      ]);
+
+      const notifications = (upcomingAppointmentsResult.data || []).map((item: any, idx: number) => {
+        const appointmentDate = new Date(item.appointment_date);
+        return {
+          id: idx + 1,
+          type: "appointment",
+          child: item.patient_name || "New Child",
+          message: `Upcoming appointment assigned by help desk at ${formatDateTime(appointmentDate)}`,
+          time: formatRelativeTime(appointmentDate),
+          patientId: item.patient_id ? String(item.patient_id) : undefined,
+        };
+      });
+      setRecentNotifications(notifications);
+
+      const mappedChildren = (recentChildrenResult.data || []).map((child: any) => ({
+        id: String(child.id),
+        name: child.name || "Unknown",
+        age: Number(child.age) || 0,
+        lastSession: child.updated_at ? new Date(child.updated_at).toLocaleDateString() : "N/A",
+        status: child.status || "In Progress",
+      }));
+      setRecentChildren(mappedChildren);
+    };
+
+    fetchDashboardStats();
+  }, [therapistUserId]);
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
@@ -49,81 +160,25 @@ export default function TherapistDashboard() {
     navigate("/login", { replace: true });
   };
 
-  const overviewStats = [
-    {
-      title: "Active Child Profiles",
-      value: "24",
-      icon: Users,
-      color: "text-teal-600",
-    },
-    {
-      title: "Upcoming Sessions",
-      value: "8",
-      icon: Calendar,
-      color: "text-green-600",
-    },
-    {
-      title: "Pending Assessments",
-      value: "5",
-      icon: FileText,
-      color: "text-orange-600",
-    },
-  ];
+  const formatRelativeTime = (date: Date) => {
+    const diffMs = date.getTime() - Date.now();
+    const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+    if (diffHours <= 0) return "today";
+    if (diffHours < 24) return `in ${diffHours} hour${diffHours === 1 ? "" : "s"}`;
+    const days = Math.round(diffHours / 24);
+    return `in ${days} day${days === 1 ? "" : "s"}`;
+  };
 
-  const recentNotifications = [
-    {
-      id: 1,
-      type: "assessment",
-      child: "Ahmad Khan",
-      message: "New assessment results available",
-      time: "2 hours ago",
-    },
-    {
-      id: 2,
-      type: "update",
-      child: "Fatima Ali",
-      message: "Caregiver added new observations",
-      time: "4 hours ago",
-    },
-    {
-      id: 3,
-      type: "session",
-      child: "Hassan Ahmed",
-      message: "Session scheduled for tomorrow",
-      time: "1 day ago",
-    },
-  ];
-
-  const recentChildren = [
-    {
-      id: 1,
-      name: "Ahmad Khan",
-      age: 4,
-      lastSession: "2 days ago",
-      status: "In Progress",
-    },
-    {
-      id: 2,
-      name: "Fatima Ali",
-      age: 6,
-      lastSession: "1 week ago",
-      status: "Assessment Complete",
-    },
-    {
-      id: 3,
-      name: "Hassan Ahmed",
-      age: 3,
-      lastSession: "3 days ago",
-      status: "Follow-up Needed",
-    },
-    {
-      id: 4,
-      name: "Aisha Malik",
-      age: 5,
-      lastSession: "5 days ago",
-      status: "In Progress",
-    },
-  ];
+  const formatDateTime = (date: Date) => {
+    if (isNaN(date.getTime())) return "scheduled time";
+    return date.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -163,7 +218,7 @@ export default function TherapistDashboard() {
         </div>
 
         {/* Overview Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {overviewStats.map((stat, index) => (
             <Card key={index}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -202,7 +257,7 @@ export default function TherapistDashboard() {
               <Button
                 variant="outline"
                 className="h-auto p-4 flex flex-col items-center space-y-2"
-                onClick={() => navigate("/therapist/screening")}
+                onClick={() => navigate("/therapist/questionnaire-selection")}
               >
                 <FileText className="h-8 w-8" />
                 <span>Continue Existing Screening</span>
@@ -243,6 +298,16 @@ export default function TherapistDashboard() {
                         <p className="text-xs text-gray-500 mt-1">
                           {notification.time}
                         </p>
+                        {notification.patientId && (
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="px-0 h-auto mt-1"
+                            onClick={() => navigate(`/therapist/child/${notification.patientId}`)}
+                          >
+                            Open patient profile
+                          </Button>
+                        )}
                       </div>
                       <Badge variant="outline" className="text-xs">
                         {notification.type}

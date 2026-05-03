@@ -4,21 +4,18 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Calendar } from './ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
-import { CalendarIcon } from 'lucide-react';
-import { format } from 'date-fns';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
 import { toast } from 'sonner';
+import { upsertDoctorRow } from '../utils/doctorProfile';
 
 export default function SignUpPage() {
   const [fullName, setFullName] = useState('');
-  const [dob, setDob] = useState<Date>();
+  const [employeeId, setEmployeeId] = useState('');
   const [contactNumber, setContactNumber] = useState('');
   const [hospitalEmail, setHospitalEmail] = useState('');
   const [cnic, setCnic] = useState('');
-  const [address, setAddress] = useState('');
+  const [hospitalBranch, setHospitalBranch] = useState('');
   const [occupation, setOccupation] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -43,38 +40,48 @@ export default function SignUpPage() {
     setCnic(formatted);
   };
 
-    const handleSignUp = async (e: React.FormEvent) => {
-  e.preventDefault();
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-  if (password !== confirmPassword) {
-    toast.error('Passwords do not match');
-    return;
-  }
+    if (password !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
 
-  const { data, error } = await supabase.auth.signUp({
-    email: hospitalEmail,
-    password,
-    options: {
-      data: {
-        fullName,
-        contactNumber,
-        cnic,
-        occupation,
-        address,
-        dob: dob?.toISOString(),
-        role: 'therapist'
+    const { data, error } = await supabase.auth.signUp({
+      email: hospitalEmail,
+      password,
+      options: {
+        data: {
+          fullName,
+          employeeId,
+          contactNumber,
+          cnic,
+          occupation,
+          hospitalBranch,
+          role: 'therapist',
+        },
+      },
+    });
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    const authUser = data.user ?? data.session?.user ?? null;
+    if (authUser) {
+      const { error: profileError } = await upsertDoctorRow(authUser);
+      if (profileError) {
+        toast.warning(
+          'Account created, but saving therapist profile failed. Run supabase/migrations/auth_profile_sync.sql and sign in again.'
+        );
       }
     }
-  });
 
-  if (error) {
-    alert(error.message);
-    return;
-  }
-
-  toast.success('Registration successful. Please check your email to confirm.');
-  navigate('/login');
-};
+    toast.success('Registration successful. Please check your email to confirm.');
+    navigate('/login');
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 to-cyan-100 p-4">
@@ -112,29 +119,17 @@ export default function SignUpPage() {
                   />
                 </div>
 
-                {/* Date of Birth */}
+                {/* EmployeeId */}
                 <div className="space-y-2">
-                  <Label>Date of Birth *</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="w-full justify-start text-left"
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {dob ? format(dob, 'PPP') : 'Select date'}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={dob}
-                        onSelect={setDob}
-                        initialFocus
-                        disabled={(date) => date > new Date() || date < new Date('1940-01-01')}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <Label htmlFor="employeeId">Employee Id *</Label>
+                  <Input
+                    id="employeeId"
+                    type="text"
+                    placeholder='Enter your Hosiptal Id'
+                    value={employeeId}
+                    onChange={(e) => setEmployeeId(e.target.value)}
+                    required
+                  />
                 </div>
 
                 {/* Contact Number */}
@@ -190,15 +185,15 @@ export default function SignUpPage() {
                   />
                 </div>
 
-                {/* Address */}
+                {/* Hospital branch */}
                 <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="address">Address *</Label>
+                  <Label htmlFor="hospitalBranch">Hospital branch *</Label>
                   <Input
-                    id="address"
+                    id="hospitalBranch"
                     type="text"
-                    placeholder="Enter your address"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="e.g. Main campus, North wing ,Clifton Branch"
+                    value={hospitalBranch}
+                    onChange={(e) => setHospitalBranch(e.target.value)}
                     required
                   />
                 </div>

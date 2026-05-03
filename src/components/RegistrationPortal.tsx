@@ -10,6 +10,7 @@ import { Calendar } from './ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Alert, AlertDescription } from './ui/alert';
 import { CalendarIcon, LogOut, UserPlus, Clock } from 'lucide-react';
+import { startOfDay } from 'date-fns';
 import { supabase } from '../utils/supabase/client';
 import { toast } from 'sonner';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
@@ -30,12 +31,19 @@ interface Appointment {
   status: string;
 }
 
+interface PatientRecord {
+  id: string;
+}
+
 export default function RegistrationPortal() {
   const navigate = useNavigate();
+  const [helpdeskUserId, setHelpdeskUserId] = useState<string | null>(null);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(false);
   const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
+  const [doctorsLoading, setDoctorsLoading] = useState(false);
+  const [doctorsError, setDoctorsError] = useState<string | null>(null);
   
   // Form state
   const [patientName, setPatientName] = useState('');
@@ -48,7 +56,15 @@ export default function RegistrationPortal() {
 
   useEffect(() => {
     fetchDoctors();
+    supabase.auth.getSession().then(({ data }) => {
+      setHelpdeskUserId(data.session?.user?.id ?? null);
+    });
   }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/login', { state: { defaultTab: 'helpdesk' } });
+  };
 
   useEffect(() => {
     if (selectedDoctor && appointmentDate) {
@@ -69,53 +85,64 @@ export default function RegistrationPortal() {
   };
 
   const fetchDoctors = async () => {
+    setDoctorsLoading(true);
+    setDoctorsError(null);
     try {
-      // Fetch doctors from the doctors table
+      // Use wildcard select to avoid schema-specific column errors.
       const { data, error } = await supabase
         .from('doctors')
         .select('*');
 
       if (error) {
         console.error('Error fetching doctors:', error);
+        setDoctors([]);
+        setDoctorsError(error.message);
         toast.error(`Failed to load doctors: ${error.message}`);
         return;
       }
 
-      console.log('Raw doctors data from Supabase:', data);
+      const mappedDoctors = (data || [])
+        .filter((doctor: any) => {
+          const status = String(doctor.status || '').toLowerCase();
+          return status !== 'inactive';
+        })
+        .map((doctor: any) => {
+          // IMPORTANT: use auth-linked user_id first so appointments map to therapist login account.
+          const doctorId = doctor.user_id || doctor.doctor_id || doctor.id;
+          const userId = doctor.user_id || doctor.id || '';
+          const fullName =
+            doctor.name ||
+            doctor.full_name ||
+            doctor.display_name ||
+            doctor.therapist_name ||
+            doctor.doctor_name;
+          const email =
+            doctor.email ||
+            doctor.work_email ||
+            doctor.hospital_email ||
+            doctor.user_email;
 
-      // Map the data to match the expected interface
-      // Handle both possible data structures: {doctor_id, user_id} or {id, name, email}
-      const mappedDoctors = (data || []).map((doctor: any) => {
-        // If the doctor already has id, name, email, use them directly
-        if (doctor.id && doctor.name && doctor.email) {
           return {
-            id: doctor.id,
-            name: doctor.name,
-            email: doctor.email
+            id: String(doctorId || ''),
+            name: fullName || `Dr. ${String(userId).slice(0, 8)}`,
+            email: email || `doctor${String(userId).slice(0, 8)}@bloomsense.com`,
           };
-        }
-        
-        // Otherwise, map from doctor_id/user_id structure
-        const doctorId = doctor.doctor_id || doctor.id;
-        const userId = doctor.user_id || '';
-        
-        return {
-          id: doctorId,
-          name: doctor.name || `Doctor ${userId || doctorId?.slice(0, 8) || 'Unknown'}`,
-          email: doctor.email || `doctor${userId || ''}@bloomsense.com`
-        };
-      });
+        })
+        .filter((doctor: Doctor) => Boolean(doctor.id) && Boolean(doctor.name));
 
-      console.log('Mapped doctors data:', mappedDoctors);
       setDoctors(mappedDoctors);
-      
-      if (!mappedDoctors || mappedDoctors.length === 0) {
-        console.warn('No doctors found in the database');
-        toast.info('No doctors found. Please add doctors to the database.');
+
+      if (mappedDoctors.length === 0) {
+        setDoctorsError('No active therapists found in doctors table.');
+        toast.info('No doctors found. Please add active doctors to the database.');
       }
     } catch (error: any) {
       console.error('Unexpected error fetching doctors:', error);
+      setDoctors([]);
+      setDoctorsError(error?.message || 'Unknown error');
       toast.error(`Failed to load doctors: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setDoctorsLoading(false);
     }
   };
 
@@ -127,7 +154,7 @@ export default function RegistrationPortal() {
       
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
-
+      
       const { data, error } = await supabase
         .from('appointments')
         .select('*')
@@ -206,26 +233,90 @@ export default function RegistrationPortal() {
       const [hours, minutes] = appointmentTime.split(':');
       appointmentDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
 
-      const appointmentData = {
-        patient_name: patientName,
-        patient_age: parseInt(patientAge),
+      // Link intake to therapist by ensuring there is a patient profile assigned to selected doctor.
+      let patientId: string | null = null;
+      const normalizedName = patientName.trim();
+      const normalizedAge = parseInt(patientAge);
+
+      const existingPatient = await supabase
+        .from('patients')
+        .select('id')
+        .eq('name', normalizedName)
+        .eq('age', normalizedAge)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingPatient.error) {
+        throw existingPatient.error;
+      }
+
+      if (existingPatient.data?.id) {
+        patientId = existingPatient.data.id;
+        const updateAssignedDoctor = await supabase
+          .from('patients')
+          .update({ assigned_doctor_id: selectedDoctor, updated_at: new Date().toISOString() })
+          .eq('id', patientId);
+        if (updateAssignedDoctor.error) {
+          console.warn('Could not update assigned_doctor_id on patient:', updateAssignedDoctor.error);
+        }
+      } else {
+        const insertedPatient = await supabase
+          .from('patients')
+          .insert([
+            {
+              name: normalizedName,
+              age: normalizedAge,
+              caregiver_name: 'Helpdesk Intake',
+              caregiver_contact: null,
+              remarks: notes || null,
+              assigned_doctor_id: selectedDoctor,
+            },
+          ])
+          .select('id')
+          .single<PatientRecord>();
+
+        if (insertedPatient.error) {
+          throw insertedPatient.error;
+        }
+        patientId = insertedPatient.data?.id ?? null;
+      }
+
+      const appointmentData: Record<string, unknown> = {
+        patient_name: normalizedName,
+        patient_age: normalizedAge,
         doctor_id: selectedDoctor,
         appointment_date: appointmentDateTime.toISOString(),
         notes: notes || null,
-        status: 'scheduled'
+        status: 'scheduled',
       };
 
-      const { data, error } = await supabase
-        .from('appointments')
-        .insert([appointmentData])
-        .select();
+      if (patientId) {
+        appointmentData.patient_id = patientId;
+      }
+
+      if (helpdeskUserId) {
+        appointmentData.created_by = helpdeskUserId;
+      }
+
+      let { data, error } = await supabase.from('appointments').insert([appointmentData]).select();
+
+      if (error && helpdeskUserId && appointmentData.created_by !== undefined) {
+        const msg = (error.message || '').toLowerCase();
+        if (msg.includes('created_by') || msg.includes('column')) {
+          delete appointmentData.created_by;
+          const retry = await supabase.from('appointments').insert([appointmentData]).select();
+          data = retry.data;
+          error = retry.error;
+        }
+      }
 
       if (error) {
         console.error('Error scheduling appointment:', error);
         throw error;
       }
 
-      toast.success('Appointment scheduled successfully!');
+      toast.success('Appointment scheduled and assigned to therapist successfully!');
       
       // Refresh appointments
       if (selectedDoctor && appointmentDate) {
@@ -270,7 +361,7 @@ export default function RegistrationPortal() {
               <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
               <h1 className="text-2xl font-semibold text-gray-900">BloomSense - Registration</h1>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/login')}>
+            <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-2" />
               Logout
             </Button>
@@ -332,9 +423,14 @@ export default function RegistrationPortal() {
                   <Label htmlFor="doctor">Select Doctor *</Label>
                   <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Choose a doctor" />
+                      <SelectValue placeholder={doctorsLoading ? "Loading therapists..." : "Choose a doctor"} />
                     </SelectTrigger>
                     <SelectContent>
+                      {doctors.length === 0 && (
+                        <SelectItem value="__no_doctors__" disabled>
+                          {doctorsLoading ? 'Loading therapists...' : 'No therapists available'}
+                        </SelectItem>
+                      )}
                       {doctors.map((doctor) => (
                         <SelectItem key={doctor.id} value={doctor.id}>
                           {doctor.name}
@@ -342,6 +438,14 @@ export default function RegistrationPortal() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {doctorsError && (
+                    <div className="flex items-center justify-between gap-3 text-xs text-red-600">
+                      <span>{doctorsError}</span>
+                      <Button type="button" variant="outline" size="sm" onClick={fetchDoctors}>
+                        Retry
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -362,7 +466,9 @@ export default function RegistrationPortal() {
                           mode="single"
                           selected={appointmentDate}
                           onSelect={setAppointmentDate}
-                          disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                          disabled={(date: Date) =>
+                            startOfDay(date) < startOfDay(new Date())
+                          }
                           initialFocus
                         />
                       </PopoverContent>

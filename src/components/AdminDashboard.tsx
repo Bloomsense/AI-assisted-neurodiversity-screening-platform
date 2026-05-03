@@ -21,38 +21,43 @@ import {
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { toast } from 'sonner@2.0.3';
 import { supabase } from '../utils/supabase/client';
+import { getApiBaseUrl } from '../config';
 
 interface Patient {
-  id: number;
+  id: string;
   name: string;
   age: number;
   status: string;
   lastSession: string;
   riskLevel?: string;
+  screeningStage?: string;
 }
 
 interface Doctors {
-  id: number;
+  doctor_id: string;
   name: string;
   email: string;
-  role: string;
+  occupation: string;
   status: string;
   patients: Patient[];
   totalPatients: number;
   lastLogin: string;
 }
 
+interface Questionnaire {
+  id: string;
+  name: string;
+}
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const [therapists, setTherapists] = useState<Doctors[]>([]);
-  const [expandedTherapists, setExpandedTherapists] = useState<Set<number>>(new Set());
+  const [expandedTherapists, setExpandedTherapists] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalTherapists: 0,
     totalPatients: 0,
-    activeScreenings: 0,
-    completedScreenings: 0
+    totalQuestionaires: 0,
   });
 
   useEffect(() => {
@@ -63,66 +68,160 @@ export default function AdminDashboard() {
 
   const loadAdminData = async () => {
     try {
-      
-      const response = await fetch(
-        'api/admin/therapists',
-        {
-          method: 'GET',
+      const adminRequest = async <T = unknown>(endpoint: string, options?: RequestInit): Promise<T> => {
+        const base = getApiBaseUrl();
+        const url = `${base}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+        const response = await fetch(url, {
           headers: {
             'Content-Type': 'application/json',
+            ...(options?.headers || {}),
           },
+          ...options,
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || 'Admin request failed');
         }
-      );
-  
-      if (response.ok) {
-        const data = await response.json();
-        
-        if (data.success && data.therapists) {
-          setTherapists(data.therapists || []);
-          
-          // Calculate stats
-          const totalPatients = data.therapists.reduce((sum: number, t: Doctors) => sum + t.totalPatients, 0);
-          const activeScreenings = data.therapists.reduce((sum: number, t: Doctors) => 
-            sum + t.patients.filter((p: Patient) => p.status !== 'Assessment Complete').length, 0
-          );
-          const completedScreenings = data.therapists.reduce((sum: number, t: Doctors) => 
-            sum + t.patients.filter((p: Patient) => p.status === 'Assessment Complete').length, 0
-          );
-          setStats({
-            totalTherapists: data.therapists.length,
-            totalPatients,
-            activeScreenings,
-            completedScreenings
-          });
-        } else {
-          console.error('API returned unsuccessful response:', data);
-          toast.error('Failed to load therapists data');
-        }
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('API error:', response.status, errorData);
-        toast.error(`Failed to load data: ${errorData.error || 'Server error'}`);
+        return result.data as T;
+      };
+
+      // Fetch doctors/patients and questionnaires.
+      const [doctorsResult, patientsResult, questionnairesResult] = await Promise.all([
+        supabase.from('doctors').select('*'),
+        supabase.from('patients').select('*'),
+        supabase.from('questionnaires').select('id', { count: 'exact', head: true }),
+      ]);
+
+      if (doctorsResult.error) throw doctorsResult.error;
+      if (patientsResult.error) throw patientsResult.error;
+      if (questionnairesResult.error) throw questionnairesResult.error;
+
+      const doctors_data = doctorsResult.data || [];
+      const patients_data = patientsResult.data || [];
+      const questionnairesCount = questionnairesResult.count ?? 0;
+      const authUserIds = doctors_data
+        .map((doctor: any) => String(doctor.user_id || '').trim())
+        .filter(Boolean);
+      let usersById: Record<string, string> = {};
+
+      try {
+        usersById = await adminRequest<Record<string, string>>('/api/auth/users-emails', {
+          method: 'POST',
+          body: JSON.stringify({ userIds: authUserIds }),
+        });
+      } catch (e: any) {
+        console.warn('Could not load auth user emails from API:', e?.message || e);
       }
-    } catch (error) {
+
+      // Transform data to match AdminDashboard interface
+      const therapists: Doctors[] = [];
+
+      for (const doctor of doctors_data) {
+        const doctor_id = doctor.employee_id;
+
+        // Get patients assigned to this doctor
+        const doctor_patients = patients_data.filter(
+          (p: any) => p.assigned_doctor_id === doctor_id
+        );
+
+        // Transform patient data
+        const formatted_patients: Patient[] = [];
+        for (const patient of doctor_patients) {
+          const last_session = patient.last_session_date || patient.last_session;
+          let last_session_str = 'No sessions yet';
+
+          if (last_session) {
+            try {
+              const last_session_date = new Date(last_session);
+              const now = new Date();
+              const days_ago = Math.floor(
+                (now.getTime() - last_session_date.getTime()) / (1000 * 60 * 60 * 24)
+              );
+
+              if (days_ago === 0) {
+                last_session_str = 'Today';
+              } else if (days_ago === 1) {
+                last_session_str = '1 day ago';
+              } else {
+                last_session_str = `${days_ago} days ago`;
+              }
+            } catch {
+              last_session_str = 'Recently';
+            }
+          }
+
+          formatted_patients.push({
+            id: String(patient.patient_id || patient.id || ''),
+            name: patient.name || 'Unknown',
+            age: patient.age || 0,
+            status: patient.status || 'In Progress',
+            lastSession: last_session_str,
+            riskLevel: patient.risk_level,
+            screeningStage: patient.profile_tag,
+          });
+        }
+
+        const email = doctor.email;
+
+        // Use active_patients from doctors table
+        const active_patients = doctor.active_patients || formatted_patients.length;
+
+        // Get last login
+        const last_login = doctor.last_login || doctor.created_at;
+        let last_login_str = '2024-01-20';
+
+        if (last_login) {
+          try {
+            const login_date = new Date(last_login);
+            last_login_str = login_date.toISOString().split('T')[0];
+          } catch {
+            last_login_str = '2024-01-20';
+          }
+        }
+
+        therapists.push({
+          doctor_id: doctor.employee_id,
+          name: doctor.name || `Dr. ${doctor.user_id || 'Unknown'}`,
+          email: doctor.email,
+          occupation: doctor.occupation || 'Therapist',
+          status: doctor.status || 'active',
+          lastLogin: last_login_str,
+          totalPatients: active_patients,
+          patients: formatted_patients,
+        });
+      }
+
+      setTherapists(therapists);
+
+      // Total patients directly from patients table rows.
+      const totalPatients = patients_data.length;
+      
+      setStats({
+        totalTherapists: therapists.length,
+        totalPatients,
+        totalQuestionaires: questionnairesCount,
+      });
+    } catch (error: any) {
       console.error('Error loading admin data:', error);
-      toast.error('Failed to connect to backend. Please ensure Flask server is running.');
+      toast.error(`Failed to load data: ${error?.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleTherapist = (therapistId: number) => {
+  const toggleTherapist = (employeeId: string) => {
     const newExpanded = new Set(expandedTherapists);
-    if (newExpanded.has(therapistId)) {
-      newExpanded.delete(therapistId);
+    if (newExpanded.has(employeeId)) {
+      newExpanded.delete(employeeId);
     } else {
-      newExpanded.add(therapistId);
+      newExpanded.add(employeeId);
     }
     setExpandedTherapists(newExpanded);
   };
 
   const expandAll = () => {
-    setExpandedTherapists(new Set(therapists.map(t => t.id)));
+    setExpandedTherapists(new Set(therapists.map((t) => t.employee_id)));
   };
 
   const collapseAll = () => {
@@ -131,7 +230,7 @@ export default function AdminDashboard() {
 
   const getRiskLevelColor = (riskLevel: string | undefined) => {
     switch (riskLevel?.toLowerCase()) {
-      case 'high': return 'bg-red-100 text-red-800';
+      case 'high': return 'bg-orange-100 text-orange-800';
       case 'moderate': return 'bg-orange-100 text-orange-800';
       case 'low': return 'bg-green-100 text-green-800';
       default: return 'bg-gray-100 text-gray-800';
@@ -203,7 +302,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
@@ -230,21 +329,10 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600">Active Screenings</p>
-                  <p className="text-2xl">{stats.activeScreenings}</p>
+                  <p className="text-sm text-gray-600">Total Questionaires</p>
+                  <p className="text-2xl">{stats.totalQuestionaires}</p>
                 </div>
                 <Activity className="h-8 w-8 text-orange-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Completed</p>
-                  <p className="text-2xl">{stats.completedScreenings}</p>
-                </div>
-                <FileText className="h-8 w-8 text-green-600" />
               </div>
             </CardContent>
           </Card>
@@ -294,11 +382,11 @@ export default function AdminDashboard() {
             ) : (
               <div className="space-y-4">
                 {filteredTherapists.map((therapist) => (
-                  <div key={therapist.id} className="border rounded-lg overflow-hidden">
+                  <div key={therapist.employee_id} className="border rounded-lg overflow-hidden">
                     {/* Therapist Header */}
                     <div 
                       className="flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
-                      onClick={() => toggleTherapist(therapist.id)}
+                      onClick={() => toggleTherapist(therapist.employee_id)}
                     >
                       <div className="flex items-center space-x-4 flex-1">
                         <Avatar className="h-12 w-12">
@@ -310,7 +398,7 @@ export default function AdminDashboard() {
                           <div className="flex items-center gap-2">
                             <h4 className="font-medium text-gray-900">{therapist.name}</h4>
                             <Badge variant="outline" className="text-xs">
-                              {therapist.role}
+                              {therapist.occupation}
                             </Badge>
                             <Badge 
                               variant={therapist.status === 'active' ? 'default' : 'secondary'}
@@ -343,7 +431,7 @@ export default function AdminDashboard() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        {expandedTherapists.has(therapist.id) ? (
+                        {expandedTherapists.has(therapist.employee_id) ? (
                           <ChevronDown className="h-5 w-5 text-gray-500" />
                         ) : (
                           <ChevronRight className="h-5 w-5 text-gray-500" />
@@ -352,7 +440,7 @@ export default function AdminDashboard() {
                     </div>
 
                     {/* Patients List (Expanded) */}
-                    {expandedTherapists.has(therapist.id) && (
+                    {expandedTherapists.has(therapist.employee_id) && (
                       <div className="p-4 bg-white border-t">
                         {therapist.patients.length === 0 ? (
                           <p className="text-sm text-gray-500 text-center py-4">No patients assigned</p>

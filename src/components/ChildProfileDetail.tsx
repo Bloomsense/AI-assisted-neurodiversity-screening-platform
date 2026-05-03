@@ -17,7 +17,6 @@ import {
   Phone, 
   PlayCircle,
   FileText,
-  Lightbulb,
   CheckCircle,
   AlertCircle,
   Clock,
@@ -32,6 +31,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { supabase } from '../utils/supabase/client';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
 export default function ChildProfileDetail() {
@@ -57,13 +57,28 @@ export default function ChildProfileDetail() {
   const [isEditingTag, setIsEditingTag] = useState(false);
   const [tempTag, setTempTag] = useState('');
 
-  const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-8d885905`;
+  // Latest screening summary
+  const [latestAssessment, setLatestAssessment] = useState<{
+    risk_level: string;
+    screen_positive: boolean;
+    total_questions: number;
+    pass_count: number;
+    fail_count: number;
+    questionnaire_type: string | null;
+    created_at: string;
+  } | null>(null);
 
-  // Load comments and meetings on component mount
+  // Use local backend in development, cloud backend in production
+  const API_BASE_URL = import.meta.env.DEV 
+    ? 'http://localhost:8000/make-server-8d885905'
+    : `https://${projectId}.supabase.co/functions/v1/make-server-8d885905`;
+
+  // Load comments, meetings, and latest assessment on component mount
   useEffect(() => {
     if (childId) {
       loadComments();
       loadMeetings();
+      loadLatestAssessment();
     }
   }, [childId]);
 
@@ -104,6 +119,29 @@ export default function ChildProfileDetail() {
       toast.error('Failed to load meetings');
     } finally {
       setLoadingMeetings(false);
+    }
+  };
+
+  const loadLatestAssessment = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('assessments')
+        .select('risk_level, screen_positive, total_questions, pass_count, fail_count, questionnaire_type, created_at')
+        .eq('patient_id', childId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error loading latest assessment:', error);
+        return;
+      }
+
+      if (data) {
+        setLatestAssessment(data);
+      }
+    } catch (error) {
+      console.error('Error loading latest assessment:', error);
     }
   };
 
@@ -163,48 +201,6 @@ export default function ChildProfileDetail() {
       status: 'created'
     }
   ];
-
-  const recommendations = [
-    {
-      id: 1,
-      category: 'Immediate Actions',
-      priority: 'high',
-      items: [
-        'Schedule follow-up assessment in 3 months',
-        'Refer to speech therapist for communication evaluation',
-        'Begin social skills group therapy'
-      ]
-    },
-    {
-      id: 2,
-      category: 'Home-based Interventions',
-      priority: 'medium',
-      items: [
-        'Implement visual schedules for daily routines',
-        'Practice joint attention activities during play',
-        'Use simple, concrete language during interactions'
-      ]
-    },
-    {
-      id: 3,
-      category: 'Long-term Goals',
-      priority: 'low',
-      items: [
-        'Develop peer interaction skills',
-        'Improve functional communication',
-        'Increase independent daily living skills'
-      ]
-    }
-  ];
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'text-red-600 bg-red-50';
-      case 'medium': return 'text-orange-600 bg-orange-50';
-      case 'low': return 'text-blue-600 bg-blue-50';
-      default: return 'text-gray-600 bg-gray-50';
-    }
-  };
 
   const getRiskBadge = (risk: string) => {
     switch (risk) {
@@ -440,12 +436,48 @@ export default function ChildProfileDetail() {
           </CardContent>
         </Card>
 
+        {/* Latest Screening Summary */}
+        {latestAssessment && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle>Latest Screening Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-600">Questionnaire</p>
+                  <p className="font-medium">
+                    {latestAssessment.questionnaire_type === 'neurodiversity'
+                      ? 'Neurodiversity Core'
+                      : 'M-CHAT-R/F'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Risk Level</p>
+                  <p className="font-medium">{latestAssessment.risk_level}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Score</p>
+                  <p className="font-medium">
+                    {latestAssessment.pass_count} passed / {latestAssessment.fail_count} failed
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Date</p>
+                  <p className="font-medium">
+                    {new Date(latestAssessment.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
             <TabsTrigger value="comments">Comments</TabsTrigger>
             <TabsTrigger value="meetings">Follow-Up</TabsTrigger>
           </TabsList>
@@ -613,53 +645,6 @@ export default function ChildProfileDetail() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Recommendations Tab */}
-          <TabsContent value="recommendations">
-            <div className="space-y-6">
-              {recommendations.map((category) => (
-                <Card key={category.id}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <Lightbulb className="h-5 w-5 mr-2" />
-                        {category.category}
-                      </div>
-                      <Badge className={getPriorityColor(category.priority)}>
-                        {category.priority.toUpperCase()} PRIORITY
-                      </Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      {category.items.map((item, index) => (
-                        <li key={index} className="flex items-start space-x-2">
-                          <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-              ))}
-              
-              <Card className="bg-teal-50 border-teal-200">
-                <CardContent className="pt-6">
-                  <div className="flex items-start space-x-3">
-                    <img src={bloomSenseLogo} alt="BloomSense" className="h-6 w-6 mt-1" />
-                    <div>
-                      <h4 className="font-medium text-teal-900 mb-2">AI-Generated Insights</h4>
-                      <p className="text-sm text-teal-800">
-                        Based on the assessment results, Ahmad shows moderate risk indicators. 
-                        Early intervention focusing on communication and social skills is recommended. 
-                        The combination of structured activities and caregiver training should yield positive outcomes.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
 
           {/* Doctor's Comments Tab */}
