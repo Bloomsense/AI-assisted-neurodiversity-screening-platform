@@ -55,8 +55,8 @@ export default function AdminDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
-    totalTherapists: 0,
     totalPatients: 0,
+    totalTherapists: 0,
     totalQuestionaires: 0,
   });
 
@@ -181,7 +181,7 @@ export default function AdminDashboard() {
         }
 
         therapists.push({
-          doctor_id: doctor.employee_id,
+          doctor_id: String(doctor.employee_id || ''),
           name: doctor.name || `Dr. ${doctor.user_id || 'Unknown'}`,
           email: doctor.email,
           occupation: doctor.occupation || 'Therapist',
@@ -210,18 +210,21 @@ export default function AdminDashboard() {
     }
   };
 
-  const toggleTherapist = (employeeId: string) => {
+  const toggleTherapist = (doctorId: string) => {
+    if (!doctorId) return;
     const newExpanded = new Set(expandedTherapists);
-    if (newExpanded.has(employeeId)) {
-      newExpanded.delete(employeeId);
+    if (newExpanded.has(doctorId)) {
+      newExpanded.delete(doctorId);
     } else {
-      newExpanded.add(employeeId);
+      newExpanded.add(doctorId);
     }
     setExpandedTherapists(newExpanded);
   };
 
   const expandAll = () => {
-    setExpandedTherapists(new Set(therapists.map((t) => t.employee_id)));
+    setExpandedTherapists(
+      new Set(therapists.map((t) => t.doctor_id).filter(Boolean))
+    );
   };
 
   const collapseAll = () => {
@@ -307,17 +310,6 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600">Total Therapists</p>
-                  <p className="text-2xl">{stats.totalTherapists}</p>
-                </div>
-                <Shield className="h-8 w-8 text-[#20B2AA]" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
                   <p className="text-sm text-gray-600">Total Patients</p>
                   <p className="text-2xl">{stats.totalPatients}</p>
                 </div>
@@ -325,6 +317,18 @@ export default function AdminDashboard() {
               </div>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Total Therapists</p>
+                  <p className="text-2xl">{stats.totalTherapists}</p>
+                </div>
+                <Shield className="h-8 w-8 text-[#20B2AA]" />
+              </div>
+            </CardContent>
+          </Card>
+          
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
@@ -381,12 +385,15 @@ export default function AdminDashboard() {
               <div className="text-center py-8 text-gray-500">No therapists found</div>
             ) : (
               <div className="space-y-4">
-                {filteredTherapists.map((therapist) => (
-                  <div key={therapist.employee_id} className="border rounded-lg overflow-hidden">
+                {filteredTherapists.map((therapist, index) => (
+                  <div
+                    key={therapist.doctor_id || `therapist-${index}`}
+                    className="border rounded-lg overflow-hidden"
+                  >
                     {/* Therapist Header */}
                     <div 
                       className="flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
-                      onClick={() => toggleTherapist(therapist.employee_id)}
+                      onClick={() => toggleTherapist(therapist.doctor_id)}
                     >
                       <div className="flex items-center space-x-4 flex-1">
                         <Avatar className="h-12 w-12">
@@ -431,7 +438,7 @@ export default function AdminDashboard() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        {expandedTherapists.has(therapist.employee_id) ? (
+                        {expandedTherapists.has(therapist.doctor_id) ? (
                           <ChevronDown className="h-5 w-5 text-gray-500" />
                         ) : (
                           <ChevronRight className="h-5 w-5 text-gray-500" />
@@ -440,7 +447,7 @@ export default function AdminDashboard() {
                     </div>
 
                     {/* Patients List (Expanded) */}
-                    {expandedTherapists.has(therapist.employee_id) && (
+                    {expandedTherapists.has(therapist.doctor_id) && (
                       <div className="p-4 bg-white border-t">
                         {therapist.patients.length === 0 ? (
                           <p className="text-sm text-gray-500 text-center py-4">No patients assigned</p>

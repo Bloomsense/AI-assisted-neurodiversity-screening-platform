@@ -23,6 +23,7 @@ import DataManagementTab from './admin-settings/DataManagementTab';
 import SystemSettingsTab from './admin-settings/SystemSettingsTab';
 import type { TherapistAccount } from './admin-settings/TherapistAcccountsTab';
 
+
 interface QuestionnaireQuestion {
   id: string;
   text: string;
@@ -672,133 +673,137 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
   const onDragOver = (e: React.DragEvent) => e.preventDefault();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center">
-              <Button variant="ghost" onClick={() => navigate('/admin/dashboard')} className="mr-4">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
-              </Button>
-              <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
-              <div>
-                <h1 className="text-2xl text-gray-900">Admin Settings</h1>
-                <p className="text-sm text-gray-600">System administration and management</p>
+    <>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <header className="bg-white shadow-sm border-b">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center py-4">
+              <div className="flex items-center">
+                <Button variant="ghost" onClick={() => navigate('/admin/dashboard')} className="mr-4">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Dashboard
+                </Button>
+                <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
+                <div>
+                  <h1 className="text-2xl text-gray-900">Admin Settings</h1>
+                  <p className="text-sm text-gray-600">System administration and management</p>
+                </div>
               </div>
             </div>
           </div>
+        </header>
+  
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* System Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Patients</p>
+                    <p className="text-2xl font-bold">{systemStats.totalChildren}</p>
+                  </div>
+                  <Users className="h-8 w-8 text-blue-600" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Therapists</p>
+                    <p className="text-2xl font-bold">{systemStats.totalTherapists}</p>
+                  </div>
+                  <Shield className="h-8 w-8 text-green-600" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Questionaires</p>
+                    <p className="text-2xl font-bold">{systemStats.totalQuestionaires}</p>
+                  </div>
+                  <BarChart className="h-8 w-8 text-red-600" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+  
+          {/* Admin Tabs */}
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="therapists">Therapist Accounts</TabsTrigger>
+              <TabsTrigger value="checklists">Assessment Tools</TabsTrigger>
+              <TabsTrigger value="data">Data Management</TabsTrigger>
+              <TabsTrigger value="system">Assign/Reassign Doctor to Patients</TabsTrigger>
+            </TabsList>
+  
+            <TabsContent value="therapists" className="space-y-6">
+              <TherapistAcccountsTab
+                therapistAccounts={therapistAccounts}
+                onAddTherapist={handleAddTherapist}
+                onToggleStatus={handleToggleStatus}
+              />
+            </TabsContent>
+  
+            <TabsContent value="checklists" className="space-y-6">
+              <AssessmentToolsTab
+                questionnaires={questionnaires}
+                selectedQuestionnaireId={selectedQuestionnaireId}
+                newQuestionnaireName={newQuestionnaireName}
+                newQuestionnaireDescription={newQuestionnaireDescription}
+                newQuestionText={newQuestionText}
+                newQuestionScore={newQuestionScore}
+                newQuestionCritical={newQuestionCritical}
+                isLoadingQuestionnaires={isLoadingQuestionnaires}
+                onSelectedQuestionnaireChange={setSelectedQuestionnaireId}
+                onNewQuestionnaireNameChange={setNewQuestionnaireName}
+                onNewQuestionnaireDescriptionChange={setNewQuestionnaireDescription}
+                onNewQuestionTextChange={setNewQuestionText}
+                onNewQuestionScoreChange={setNewQuestionScore}
+                onNewQuestionCriticalChange={setNewQuestionCritical}
+                onAddQuestionnaire={handleAddQuestionnaire}
+                onDeleteQuestionnaire={handleDeleteQuestionnaire}
+                onAddQuestion={handleAddQuestion}
+                onDeleteQuestion={handleDeleteQuestion}
+              />
+            </TabsContent>
+  
+            <TabsContent value="data" className="space-y-6">
+              <DataManagementTab
+                includePersonal={includePersonal}
+                includeScores={includeScores}
+                includeSession={includeSession}
+                isExporting={isExporting}
+                importType={importType}
+                isImporting={isImporting}
+                fileInputRef={fileInputRef}
+                onIncludePersonalChange={setIncludePersonal}
+                onIncludeScoresChange={setIncludeScores}
+                onIncludeSessionChange={setincludeSession}
+                onExportCSV={handleExportCSV}
+                onExportJSON={handleExportJSON}
+                onImportTypeChange={setImportType}
+                onFileChange={onFileChange}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+              />
+            </TabsContent>
+  
+            <TabsContent value="system" className="space-y-6">
+              <SystemSettingsTab />
+            </TabsContent>
+          </Tabs>
         </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* System Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Children</p>
-                  <p className="text-2xl font-bold">{systemStats.totalChildren}</p>
-                </div>
-                <Users className="h-8 w-8 text-blue-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Therapists</p>
-                  <p className="text-2xl font-bold">{systemStats.totalTherapists}</p>
-                </div>
-                <Shield className="h-8 w-8 text-green-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Questionaires</p>
-                  <p className="text-2xl font-bold">{systemStats.totalQuestionaires}</p>
-                </div>
-                <BarChart className="h-8 w-8 text-red-600" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Admin Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="therapists">Therapist Accounts</TabsTrigger>
-            <TabsTrigger value="checklists">Assessment Tools</TabsTrigger>
-            <TabsTrigger value="data">Data Management</TabsTrigger>
-            <TabsTrigger value="system">Assign/Reassign Doctor to Patients</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="therapists" className="space-y-6">
-            <TherapistAcccountsTab
-              therapistAccounts={therapistAccounts}
-              onAddTherapist={handleAddTherapist}
-              onToggleStatus={handleToggleStatus}
-            />
-          </TabsContent>
-
-          <TabsContent value="checklists" className="space-y-6">
-            <AssessmentToolsTab
-              questionnaires={questionnaires}
-              selectedQuestionnaireId={selectedQuestionnaireId}
-              newQuestionnaireName={newQuestionnaireName}
-              newQuestionnaireDescription={newQuestionnaireDescription}
-              newQuestionText={newQuestionText}
-              newQuestionScore={newQuestionScore}
-              newQuestionCritical={newQuestionCritical}
-              isLoadingQuestionnaires={isLoadingQuestionnaires}
-              onSelectedQuestionnaireChange={setSelectedQuestionnaireId}
-              onNewQuestionnaireNameChange={setNewQuestionnaireName}
-              onNewQuestionnaireDescriptionChange={setNewQuestionnaireDescription}
-              onNewQuestionTextChange={setNewQuestionText}
-              onNewQuestionScoreChange={setNewQuestionScore}
-              onNewQuestionCriticalChange={setNewQuestionCritical}
-              onAddQuestionnaire={handleAddQuestionnaire}
-              onDeleteQuestionnaire={handleDeleteQuestionnaire}
-              onAddQuestion={handleAddQuestion}
-              onDeleteQuestion={handleDeleteQuestion}
-            />
-          </TabsContent>
-
-          <TabsContent value="data" className="space-y-6">
-            <DataManagementTab
-              includePersonal={includePersonal}
-              includeScores={includeScores}
-              includeSession={includeSession}
-              isExporting={isExporting}
-              importType={importType}
-              isImporting={isImporting}
-              fileInputRef={fileInputRef}
-              onIncludePersonalChange={setIncludePersonal}
-              onIncludeScoresChange={setIncludeScores}
-              onIncludeSessionChange={setincludeSession}
-              onExportCSV={handleExportCSV}
-              onExportJSON={handleExportJSON}
-              onImportTypeChange={setImportType}
-              onFileChange={onFileChange}
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-            />
-          </TabsContent>
-
-          <TabsContent value="system" className="space-y-6">
-            <SystemSettingsTab />
-          </TabsContent>
-        </Tabs>
       </div>
+  
+      {/* Confirm Delete Modal - outside root div so fixed positioning works correctly */}
       {confirmOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm p-4"
+          className="fixed inset-0 n flex items-center justify-center bg-black/45 backdrop-blur-sm p-4"
           onClick={() => {
             if (!isDeletingItem) setConfirmOpen(false);
           }}
@@ -832,6 +837,6 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
           </div>
         </div>
       )}
-    </div>
+    </>
   );
-}
+  }
