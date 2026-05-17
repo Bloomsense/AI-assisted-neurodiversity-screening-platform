@@ -259,11 +259,18 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
 
   const mapTherapist = (row: any): TherapistAccount => ({
     employee_id: String(row.employee_id || ''),
+    user_id: row.user_id ? String(row.user_id) : '',
     name: row.name || 'Unknown',
     email: row.email || 'N/A',
     role: row.occupation || 'Therapist',
     status: row.status || 'active',
     patients: row.active_patients || 0,
+    contact_number: row.contact_number || '',
+    branch_name: row.branch_name || '',
+    active_patients: row.active_patients ?? 0,
+    upcoming_sessions: row.upcoming_sessions ?? 0,
+    pending_assignments: row.pending_assignments ?? 0,
+    created_at: row.created_at || '',
   });
 
   const fetchTherapists = async () => {
@@ -311,6 +318,20 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
 
   const handleAddTherapist = () => {
     toast.info('Add therapist form will be added next.');
+  };
+
+  const handleSaveTherapistDetails = (employeeId: string, details: TherapistAccount) => {
+    setTherapistAccounts((prev) =>
+      prev.map((t) =>
+        t.employee_id === employeeId
+          ? {
+              ...details,
+              patients: details.active_patients ?? details.patients ?? t.patients,
+            }
+          : t
+      )
+    );
+    toast.success('Therapist details updated (frontend preview).');
   };
 
   const handleToggleStatus = async (employeeId: string, currentStatus: string) => {
@@ -742,11 +763,12 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
             </TabsList>
   
             <TabsContent value="therapists" className="space-y-6">
-              <TherapistAcccountsTab
-                therapistAccounts={therapistAccounts}
-                onAddTherapist={handleAddTherapist}
-                onToggleStatus={handleToggleStatus}
-              />
+            <TherapistAcccountsTab
+              therapistAccounts={therapistAccounts}
+              onAddTherapist={handleAddTherapist}
+              onToggleStatus={handleToggleStatus}
+              onSaveTherapistDetails={handleSaveTherapistDetails}
+            />
             </TabsContent>
   
             <TabsContent value="checklists" className="space-y-6">
