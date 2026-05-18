@@ -19,6 +19,13 @@ import { supabase } from '../utils/supabase/client';
 import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 
 type EventType = 'session' | 'assessment' | null;
+type Child = {
+  id: string;
+  name: string;
+  age: number;
+  lastSession: string;
+  status: string;
+};
 
 type ChildRecord = {
   id: string;
