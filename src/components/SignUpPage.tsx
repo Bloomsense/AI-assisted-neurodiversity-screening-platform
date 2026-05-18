@@ -56,6 +56,7 @@ export default function SignUpPage() {
           fullName,
           employeeId,
           contactNumber,
+          hospitalEmail,
           cnic,
           occupation,
           hospitalBranch,
@@ -71,7 +72,14 @@ export default function SignUpPage() {
 
     const authUser = data.user ?? data.session?.user ?? null;
     if (authUser) {
-      const { error: profileError } = await upsertDoctorRow(authUser);
+      const { error: profileError } = await upsertDoctorRow(authUser, {
+        email: hospitalEmail,
+        fullName,
+        employeeId,
+        contactNumber,
+        occupation,
+        hospitalBranch,
+      });
       if (profileError) {
         toast.warning(
           'Account created, but saving therapist profile failed. Run supabase/migrations/auth_profile_sync.sql and sign in again.'

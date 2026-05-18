@@ -1,32 +1,55 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabase/client';
 
+export type DoctorSignupFields = {
+  email?: string;
+  fullName?: string;
+  employeeId?: string;
+  contactNumber?: string;
+  occupation?: string;
+  hospitalBranch?: string;
+};
+
 /**
  * Upserts a row in doctors for this auth user.
  * Works alongside DB trigger migration for compatibility/fallback.
  */
-export async function upsertDoctorRow(user: User): Promise<{ error: Error | null }> {
+export async function upsertDoctorRow(
+  user: User,
+  fields?: DoctorSignupFields
+): Promise<{ error: Error | null }> {
   const meta = user.user_metadata || {};
   if (meta.role !== 'therapist') {
     return { error: null };
   }
 
-  const baseName = (meta.fullName as string) || user.email || 'Therapist';
-  const baseContact = (meta.contactNumber as string) || null;
-  const baseOccupation = (meta.occupation as string) || null;
+  const baseEmail =
+    fields?.email?.trim() ||
+    user.email?.trim() ||
+    (meta.hospitalEmail as string)?.trim() ||
+    '';
+  const baseName =
+    fields?.fullName?.trim() ||
+    (meta.fullName as string)?.trim() ||
+    baseEmail ||
+    'Therapist';
+  const baseContact = fields?.contactNumber?.trim() || (meta.contactNumber as string) || null;
+  const baseOccupation = fields?.occupation?.trim() || (meta.occupation as string) || null;
   const baseBranch =
+    fields?.hospitalBranch?.trim() ||
     (meta.branch_name as string) ||
     (meta.hospitalBranch as string) ||
     (meta.hospital_branch as string) ||
     (meta.address as string) ||
     null;
-  const baseEmployeeId = (meta.employeeId as string) || null;
+  const baseEmployeeId = fields?.employeeId?.trim() || (meta.employeeId as string) || null;
 
   // Preferred/current schema from doctors table editor.
   const modernRow = {
     employee_id: baseEmployeeId,
     user_id: user.id,
     name: baseName,
+    email: baseEmail,
     contact_number: baseContact,
     occupation: baseOccupation,
     branch_name: baseBranch,

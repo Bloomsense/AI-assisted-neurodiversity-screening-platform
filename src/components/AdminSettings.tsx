@@ -23,6 +23,7 @@ import DataManagementTab from './admin-settings/DataManagementTab';
 import SystemSettingsTab from './admin-settings/SystemSettingsTab';
 import type { TherapistAccount } from './admin-settings/TherapistAcccountsTab';
 
+
 interface QuestionnaireQuestion {
   id: string;
   text: string;
@@ -258,11 +259,41 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
 
   const mapTherapist = (row: any): TherapistAccount => ({
     employee_id: String(row.employee_id || ''),
+    user_id: row.user_id ? String(row.user_id) : '',
     name: row.name || 'Unknown',
     email: row.email || 'N/A',
     role: row.occupation || 'Therapist',
     status: row.status || 'active',
     patients: row.active_patients || 0,
+    contact_number: row.contact_number || '',
+    branch_name: row.branch_name || '',
+    active_patients: row.active_patients ?? 0,
+    upcoming_sessions: row.upcoming_sessions ?? 0,
+    pending_assignments: row.pending_assignments ?? 0,
+    created_at: row.created_at || '',
+  });
+
+  const getPatientCountsByDoctor = async (): Promise<Record<string, number>> => {
+    const { data: patientsData, error: patientsError } = await supabase
+      .from('patients')
+      .select('assigned_doctor_id');
+    if (patientsError) throw patientsError;
+
+    const patientCounts: Record<string, number> = {};
+    (patientsData || []).forEach((p: any) => {
+      const key = String(p.assigned_doctor_id || '').trim();
+      if (!key) return;
+      patientCounts[key] = (patientCounts[key] || 0) + 1;
+    });
+    return patientCounts;
+  };
+
+  const enrichTherapistWithPatientCount = (
+    therapist: TherapistAccount,
+    patientCounts: Record<string, number>
+  ): TherapistAccount => ({
+    ...therapist,
+    patients: patientCounts[therapist.employee_id] ?? therapist.patients ?? 0,
   });
 
   const fetchTherapists = async () => {
@@ -270,29 +301,20 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
       const result = await assessmentToolsRequest<any[]>('/api/therapists');
       const rows = Array.isArray(result.data) ? result.data : [];
       const mapped = rows.map(mapTherapist);
+      const patientCounts = await getPatientCountsByDoctor();
 
-      // Keep patient numbers accurate by counting assignments from patients table.
-      const { data: patientsData, error: patientsError } = await supabase
-        .from('patients')
-        .select('assigned_doctor_id');
-      if (patientsError) throw patientsError;
-
-      const patientCounts: Record<string, number> = {};
-      (patientsData || []).forEach((p: any) => {
-        const key = String( p.assigned_doctor_id || '').trim();
-        if (!key) return;
-        patientCounts[key] = (patientCounts[key] || 0) + 1;
-      });
-
-      setTherapistAccounts(
-        mapped.map((t) => ({
-          ...t,
-          patients: patientCounts[t.employee_id] ?? t.patients ?? 0,
-        }))
-      );
+      setTherapistAccounts(mapped.map((t) => enrichTherapistWithPatientCount(t, patientCounts)));
     } catch (error: any) {
       toast.error(`Failed to load therapist accounts: ${error.message}`);
     }
+  };
+
+  const fetchTherapistById = async (employeeId: string): Promise<TherapistAccount> => {
+    const result = await assessmentToolsRequest<any>(`/api/therapists/${encodeURIComponent(employeeId)}`);
+    const row = result.data;
+    if (!row) throw new Error('Therapist not found');
+    const patientCounts = await getPatientCountsByDoctor();
+    return enrichTherapistWithPatientCount(mapTherapist(row), patientCounts);
   };
 
   const fetchTotalChildren = async () => {
@@ -310,6 +332,31 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
 
   const handleAddTherapist = () => {
     toast.info('Add therapist form will be added next.');
+  };
+
+  const handleSaveTherapistDetails = async (employeeId: string, details: TherapistAccount) => {
+    const result = await assessmentToolsRequest<any>(
+      `/api/therapists/${encodeURIComponent(employeeId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: details.name,
+          email: details.email,
+          contact_number: details.contact_number,
+          occupation: details.role,
+          branch_name: details.branch_name,
+          status: details.status,
+        }),
+      }
+    );
+
+    const patientCounts = await getPatientCountsByDoctor();
+    const updated = enrichTherapistWithPatientCount(mapTherapist(result.data), patientCounts);
+
+    setTherapistAccounts((prev) =>
+      prev.map((t) => (t.employee_id === employeeId ? updated : t))
+    );
+    toast.success('Therapist details saved.');
   };
 
   const handleToggleStatus = async (employeeId: string, currentStatus: string) => {
@@ -672,133 +719,139 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
   const onDragOver = (e: React.DragEvent) => e.preventDefault();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center">
-              <Button variant="ghost" onClick={() => navigate('/admin/dashboard')} className="mr-4">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
-              </Button>
-              <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
-              <div>
-                <h1 className="text-2xl text-gray-900">Admin Settings</h1>
-                <p className="text-sm text-gray-600">System administration and management</p>
+    <>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <header className="bg-white shadow-sm border-b">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center py-4">
+              <div className="flex items-center">
+                <Button variant="ghost" onClick={() => navigate('/admin/dashboard')} className="mr-4">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Dashboard
+                </Button>
+                <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
+                <div>
+                  <h1 className="text-2xl text-gray-900">Admin Settings</h1>
+                  <p className="text-sm text-gray-600">System administration and management</p>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* System Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Children</p>
-                  <p className="text-2xl font-bold">{systemStats.totalChildren}</p>
+        </header>
+  
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* System Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Patients</p>
+                    <p className="text-2xl font-bold">{systemStats.totalChildren}</p>
+                  </div>
+                  <Users className="h-8 w-8 text-blue-600" />
                 </div>
-                <Users className="h-8 w-8 text-blue-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Therapists</p>
-                  <p className="text-2xl font-bold">{systemStats.totalTherapists}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Therapists</p>
+                    <p className="text-2xl font-bold">{systemStats.totalTherapists}</p>
+                  </div>
+                  <Shield className="h-8 w-8 text-green-600" />
                 </div>
-                <Shield className="h-8 w-8 text-green-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Questionaires</p>
-                  <p className="text-2xl font-bold">{systemStats.totalQuestionaires}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Questionaires</p>
+                    <p className="text-2xl font-bold">{systemStats.totalQuestionaires}</p>
+                  </div>
+                  <BarChart className="h-8 w-8 text-red-600" />
                 </div>
-                <BarChart className="h-8 w-8 text-red-600" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Admin Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="therapists">Therapist Accounts</TabsTrigger>
-            <TabsTrigger value="checklists">Assessment Tools</TabsTrigger>
-            <TabsTrigger value="data">Data Management</TabsTrigger>
-            <TabsTrigger value="system">Assign/Reassign Doctor to Patients</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="therapists" className="space-y-6">
+              </CardContent>
+            </Card>
+          </div>
+  
+          {/* Admin Tabs */}
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="therapists">Therapist Accounts</TabsTrigger>
+              <TabsTrigger value="checklists">Assessment Tools</TabsTrigger>
+              <TabsTrigger value="data">Data Management</TabsTrigger>
+              <TabsTrigger value="system">Assign/Reassign Doctor to Patients</TabsTrigger>
+            </TabsList>
+  
+            <TabsContent value="therapists" className="space-y-6">
             <TherapistAcccountsTab
               therapistAccounts={therapistAccounts}
               onAddTherapist={handleAddTherapist}
               onToggleStatus={handleToggleStatus}
+              onLoadTherapistDetails={fetchTherapistById}
+              onSaveTherapistDetails={handleSaveTherapistDetails}
             />
-          </TabsContent>
-
-          <TabsContent value="checklists" className="space-y-6">
-            <AssessmentToolsTab
-              questionnaires={questionnaires}
-              selectedQuestionnaireId={selectedQuestionnaireId}
-              newQuestionnaireName={newQuestionnaireName}
-              newQuestionnaireDescription={newQuestionnaireDescription}
-              newQuestionText={newQuestionText}
-              newQuestionScore={newQuestionScore}
-              newQuestionCritical={newQuestionCritical}
-              isLoadingQuestionnaires={isLoadingQuestionnaires}
-              onSelectedQuestionnaireChange={setSelectedQuestionnaireId}
-              onNewQuestionnaireNameChange={setNewQuestionnaireName}
-              onNewQuestionnaireDescriptionChange={setNewQuestionnaireDescription}
-              onNewQuestionTextChange={setNewQuestionText}
-              onNewQuestionScoreChange={setNewQuestionScore}
-              onNewQuestionCriticalChange={setNewQuestionCritical}
-              onAddQuestionnaire={handleAddQuestionnaire}
-              onDeleteQuestionnaire={handleDeleteQuestionnaire}
-              onAddQuestion={handleAddQuestion}
-              onDeleteQuestion={handleDeleteQuestion}
-            />
-          </TabsContent>
-
-          <TabsContent value="data" className="space-y-6">
-            <DataManagementTab
-              includePersonal={includePersonal}
-              includeScores={includeScores}
-              includeSession={includeSession}
-              isExporting={isExporting}
-              importType={importType}
-              isImporting={isImporting}
-              fileInputRef={fileInputRef}
-              onIncludePersonalChange={setIncludePersonal}
-              onIncludeScoresChange={setIncludeScores}
-              onIncludeSessionChange={setincludeSession}
-              onExportCSV={handleExportCSV}
-              onExportJSON={handleExportJSON}
-              onImportTypeChange={setImportType}
-              onFileChange={onFileChange}
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-            />
-          </TabsContent>
-
-          <TabsContent value="system" className="space-y-6">
-            <SystemSettingsTab />
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+  
+            <TabsContent value="checklists" className="space-y-6">
+              <AssessmentToolsTab
+                questionnaires={questionnaires}
+                selectedQuestionnaireId={selectedQuestionnaireId}
+                newQuestionnaireName={newQuestionnaireName}
+                newQuestionnaireDescription={newQuestionnaireDescription}
+                newQuestionText={newQuestionText}
+                newQuestionScore={newQuestionScore}
+                newQuestionCritical={newQuestionCritical}
+                isLoadingQuestionnaires={isLoadingQuestionnaires}
+                onSelectedQuestionnaireChange={setSelectedQuestionnaireId}
+                onNewQuestionnaireNameChange={setNewQuestionnaireName}
+                onNewQuestionnaireDescriptionChange={setNewQuestionnaireDescription}
+                onNewQuestionTextChange={setNewQuestionText}
+                onNewQuestionScoreChange={setNewQuestionScore}
+                onNewQuestionCriticalChange={setNewQuestionCritical}
+                onAddQuestionnaire={handleAddQuestionnaire}
+                onDeleteQuestionnaire={handleDeleteQuestionnaire}
+                onAddQuestion={handleAddQuestion}
+                onDeleteQuestion={handleDeleteQuestion}
+              />
+            </TabsContent>
+  
+            <TabsContent value="data" className="space-y-6">
+              <DataManagementTab
+                includePersonal={includePersonal}
+                includeScores={includeScores}
+                includeSession={includeSession}
+                isExporting={isExporting}
+                importType={importType}
+                isImporting={isImporting}
+                fileInputRef={fileInputRef}
+                onIncludePersonalChange={setIncludePersonal}
+                onIncludeScoresChange={setIncludeScores}
+                onIncludeSessionChange={setincludeSession}
+                onExportCSV={handleExportCSV}
+                onExportJSON={handleExportJSON}
+                onImportTypeChange={setImportType}
+                onFileChange={onFileChange}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+              />
+            </TabsContent>
+  
+            <TabsContent value="system" className="space-y-6">
+              <SystemSettingsTab />
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
+  
+      {/* Confirm Delete Modal - outside root div so fixed positioning works correctly */}
       {confirmOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm p-4"
+          className="fixed inset-0 n flex items-center justify-center bg-black/45 backdrop-blur-sm p-4"
           onClick={() => {
             if (!isDeletingItem) setConfirmOpen(false);
           }}
@@ -832,6 +885,6 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
           </div>
         </div>
       )}
-    </div>
+    </>
   );
-}
+  }
