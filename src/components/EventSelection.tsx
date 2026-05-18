@@ -53,7 +53,7 @@ export default function EventSelection() {
         }
 
         const mapped: ChildRecord[] = (data || []).map((row: Record<string, unknown>) => {
-          const pid = row.patient_id ?? row.id;
+          const pid = row.patient_id;
           const last =
             typeof row.last_session_date === 'string' || row.last_session_date instanceof Date
               ? new Date(row.last_session_date as string).toLocaleDateString()

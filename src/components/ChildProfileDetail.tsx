@@ -134,26 +134,6 @@ export default function ChildProfileDetail() {
       if (data) {
         setPatient(data as PatientRow);
         setCustomTag(data.profile_tag || data.status || 'In Progress');
-        return;
-      }
-
-      const { data: byId, error: idError } = await supabase
-        .from('patients')
-        .select(
-          'patient_id, name, age, date_of_birth, gender, caregiver_name, caregiver_contact, remarks, status, profile_created_date, profile_tag, risk_level, assigned_doctor_id',
-        )
-        .eq('id', childId)
-        .maybeSingle();
-
-      if (idError) {
-        console.error('Error loading patient by id:', idError);
-        toast.error('Failed to load child profile');
-        return;
-      }
-
-      if (byId) {
-        setPatient(byId as PatientRow);
-        setCustomTag(byId.profile_tag || byId.status || 'In Progress');
       } else {
         toast.error('Child profile not found');
       }

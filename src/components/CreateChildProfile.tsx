@@ -96,7 +96,7 @@ export default function CreateChildProfile() {
       const { data, error } = await supabase
         .from('patients')
         .insert([patientData])
-        .select('patient_id, id')
+        .select('patient_id')
         .single();
 
       if (error) {
@@ -106,7 +106,7 @@ export default function CreateChildProfile() {
         return;
       }
 
-      const childId = data?.patient_id ?? data?.id;
+      const childId = data?.patient_id;
       if (!childId) {
         toast.error('Failed to save patient: No patient ID returned');
         setIsSaving(false);
