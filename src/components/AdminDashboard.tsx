@@ -21,7 +21,7 @@ import {
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { toast } from 'sonner@2.0.3';
 import { supabase } from '../utils/supabase/client';
-import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
+import { getApiBaseUrl } from '../config';
 
 interface Patient {
   id: string;
@@ -89,8 +89,8 @@ export default function AdminDashboard() {
       // Fetch doctors/patients and questionnaires.
       const [doctorsResult, patientsResult, questionnairesResult] = await Promise.all([
         supabase.from('doctors').select('*'),
-        supabase.from('patients').select(PATIENT_SELECT_COLUMNS),
-        supabase.from('users').select('user_id,email')
+        supabase.from('patients').select('*'),
+        supabase.from('questionnaires').select('id', { count: 'exact', head: true }),
       ]);
 
       if (doctorsResult.error) throw doctorsResult.error;
@@ -152,10 +152,10 @@ export default function AdminDashboard() {
           }
 
           formatted_patients.push({
-            id: patient.patient_id,
-            name: patient.name || patient.patient_name || patient.full_name || 'Unknown',
-            age: patient.age || patient.patient_age || 0,
-            status: patient.status || patient.screening_status || 'In Progress',
+            id: String(patient.patient_id || patient.id || ''),
+            name: patient.name || 'Unknown',
+            age: patient.age || 0,
+            status: patient.status || 'In Progress',
             lastSession: last_session_str,
             riskLevel: patient.risk_level,
             screeningStage: patient.profile_tag,

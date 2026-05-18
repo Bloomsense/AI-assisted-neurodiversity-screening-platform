@@ -32,34 +32,7 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { supabase } from '../utils/supabase/client';
-import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
-
-type PatientRow = {
-  patient_id: string;
-  name: string;
-  age: number;
-  date_of_birth: string | null;
-  gender: string | null;
-  caregiver_name: string;
-  caregiver_contact: string | null;
-  remarks: string | null;
-  status: string | null;
-  profile_created_date: string | null;
-  profile_tag: string | null;
-  risk_level: string | null;
-  assigned_doctor_id: string | null;
-};
-
-function parseCaregiverContact(contact: string | null) {
-  if (!contact) return { phone: '', email: '' };
-  if (contact.includes(' | ')) {
-    const [phone, email] = contact.split(' | ', 2);
-    return { phone: phone.trim(), email: email.trim() };
-  }
-  if (contact.includes('@')) return { phone: '', email: contact.trim() };
-  return { phone: contact.trim(), email: '' };
-}
 
 export default function ChildProfileDetail() {
   const navigate = useNavigate();
@@ -84,9 +57,6 @@ export default function ChildProfileDetail() {
   const [isEditingTag, setIsEditingTag] = useState(false);
   const [tempTag, setTempTag] = useState('');
 
-  const [patient, setPatient] = useState<PatientRow | null>(null);
-  const [loadingPatient, setLoadingPatient] = useState(true);
-
   // Latest screening summary
   const [latestAssessment, setLatestAssessment] = useState<{
     risk_level: string;
@@ -106,42 +76,11 @@ export default function ChildProfileDetail() {
   // Load comments, meetings, and latest assessment on component mount
   useEffect(() => {
     if (childId) {
-      loadPatient();
       loadComments();
       loadMeetings();
       loadLatestAssessment();
     }
   }, [childId]);
-
-  const loadPatient = async () => {
-    if (!childId) return;
-    try {
-      setLoadingPatient(true);
-      const { data, error } = await supabase
-        .from('patients')
-        .select(PATIENT_SELECT_COLUMNS)
-        .eq('patient_id', childId)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error loading patient:', error);
-        toast.error('Failed to load child profile');
-        return;
-      }
-
-      if (data) {
-        setPatient(data as PatientRow);
-        setCustomTag(data.profile_tag || data.status || 'In Progress');
-      } else {
-        toast.error('Child profile not found');
-      }
-    } catch (error) {
-      console.error('Error loading patient:', error);
-      toast.error('Failed to load child profile');
-    } finally {
-      setLoadingPatient(false);
-    }
-  };
 
   const loadComments = async () => {
     try {
@@ -206,23 +145,17 @@ export default function ChildProfileDetail() {
     }
   };
 
-  const contact = parseCaregiverContact(patient?.caregiver_contact ?? null);
-  const childData = patient
-    ? {
-        id: patient.patient_id || childId || '',
-        name: patient.name,
-        age: patient.age,
-        gender: patient.gender || 'Not specified',
-        caregiverName: patient.caregiver_name,
-        caregiverPhone: contact.phone || contact.email || '—',
-        caregiverEmail: contact.email,
-        remarks: patient.remarks,
-        status: patient.status,
-        riskLevel: patient.risk_level,
-        createdDate: patient.profile_created_date || new Date().toISOString(),
-        lastAssessment: latestAssessment?.created_at ?? null,
-      }
-    : null;
+  // Mock child data
+  const childData = {
+    id: childId || '1',
+    name: 'Ahmad Khan',
+    age: 4,
+    gender: 'Male',
+    caregiverName: 'Fatima Khan',
+    caregiverPhone: '+92 300 1234567',
+    createdDate: '2024-01-15',
+    lastAssessment: '2024-01-20'
+  };
 
   const assessmentHistory = [
     {
@@ -346,7 +279,7 @@ export default function ChildProfileDetail() {
         body: JSON.stringify({
           date: meetingDate.toISOString().split('T')[0],
           time: meetingTime,
-          parentPhone: childData?.caregiverPhone ?? ''
+          parentPhone: childData.caregiverPhone
         })
       });
 
@@ -395,34 +328,6 @@ export default function ChildProfileDetail() {
     }
   };
 
-  if (loadingPatient) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-      </div>
-    );
-  }
-
-  if (!childData) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4 px-4">
-        <p className="text-gray-600">Child profile not found.</p>
-        <Button variant="outline" onClick={() => navigate('/therapist/dashboard')}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to dashboard
-        </Button>
-      </div>
-    );
-  }
-
-  const initials = childData.name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -454,7 +359,7 @@ export default function ChildProfileDetail() {
           <CardContent className="pt-6">
             <div className="flex items-start space-x-6">
               <Avatar className="h-20 w-20">
-                <AvatarFallback className="text-2xl">{initials}</AvatarFallback>
+                <AvatarFallback className="text-2xl">AK</AvatarFallback>
               </Avatar>
               <div className="flex-1">
                 <div className="flex items-center justify-between mb-2">
@@ -524,7 +429,6 @@ export default function ChildProfileDetail() {
                   <div className="flex items-center text-gray-600">
                     <Phone className="h-4 w-4 mr-2" />
                     {childData.caregiverPhone}
-                    {childData.caregiverEmail ? ` · ${childData.caregiverEmail}` : ''}
                   </div>
                 </div>
               </div>
@@ -696,9 +600,7 @@ export default function ChildProfileDetail() {
                         <div className="flex justify-between">
                           <span className="text-sm text-gray-600">Last Assessment</span>
                           <span className="text-sm font-medium">
-                            {childData.lastAssessment
-                              ? new Date(childData.lastAssessment).toLocaleDateString()
-                              : 'No assessment yet'}
+                            {new Date(childData.lastAssessment).toLocaleDateString()}
                           </span>
                         </div>
                         <div className="flex justify-between">

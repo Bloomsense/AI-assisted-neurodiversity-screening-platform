@@ -291,20 +291,23 @@ export default function ScreeningWorkflow() {
             <CardHeader>
               <CardTitle>Behavior-Based Assessment</CardTitle>
               <p className="text-sm text-gray-600">
-                Add clinical observations and clear recommendations for follow-up.
+                Provide detailed observations of motor skills and communication cues.
               </p>
             </CardHeader>
             <CardContent className="space-y-6">
               {/* Behavior Observations */}
               <div className="space-y-3">
-                <Label htmlFor="behaviorNotes">Observations & recommendations</Label>
+                <Label htmlFor="behaviorNotes">Motor Skills & Communication Observations</Label>
                 <Textarea
                   id="behaviorNotes"
-                  placeholder="Document observations and recommendations, for example:
-• Key behaviours observed during the session
-• Strengths and areas of concern
-• Suggested next steps or referrals
-• Practical strategies for home or school"
+                  placeholder="Document observations about:
+• Motor coordination and movement patterns
+• Eye contact and social engagement
+• Verbal and non-verbal communication
+• Response to social interactions
+• Repetitive behaviors or movements
+• Sensory sensitivities
+• Play and interaction style"
                   className="min-h-[200px]"
                   value={behaviorNotes}
                   onChange={(e) => setBehaviorNotes(e.target.value)}
