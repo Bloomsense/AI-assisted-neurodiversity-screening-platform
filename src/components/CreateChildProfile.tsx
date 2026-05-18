@@ -18,10 +18,15 @@ function buildCaregiverContact(phone: string, email: string): string | null {
   return p || e || null;
 }
 
-function generatePatientId(): string {
-  const stamp = Date.now().toString(36).toUpperCase();
-  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `BS-${stamp}${suffix}`;
+/** Map form labels to `gender_type` enum values in Supabase (adjust if your enum differs). */
+function toGenderEnum(value: string): string | null {
+  if (!value) return null;
+  const map: Record<string, string> = {
+    Male: 'male',
+    Female: 'female',
+    Other: 'other',
+  };
+  return map[value] ?? value.toLowerCase();
 }
 
 async function resolveAssignedDoctorId(): Promise<string | null> {
@@ -76,22 +81,22 @@ export default function CreateChildProfile() {
 
     try {
       const assignedDoctorId = await resolveAssignedDoctorId();
+      const today = new Date().toISOString().slice(0, 10);
 
-      const patientData = {
-        patient_id: generatePatientId(),
+      const patientData: Record<string, unknown> = {
         name: formData.childName.trim(),
         age: ageNum,
         date_of_birth: null,
-        gender: formData.gender || null,
+        gender: toGenderEnum(formData.gender),
         caregiver_name: formData.caregiverName.trim(),
         caregiver_contact: buildCaregiverContact(formData.caregiverPhone, formData.contactInfo),
         remarks: formData.remarks.trim() || null,
-        status: 'In Progress',
-        profile_created_date: new Date().toISOString(),
-        profile_tag: null,
-        risk_level: null,
-        assigned_doctor_id: assignedDoctorId,
+        profile_created_date: today,
       };
+
+      if (assignedDoctorId) {
+        patientData.assigned_doctor_id = assignedDoctorId;
+      }
 
       const { data, error } = await supabase
         .from('patients')
@@ -108,7 +113,7 @@ export default function CreateChildProfile() {
 
       const childId = data?.patient_id;
       if (!childId) {
-        toast.error('Failed to save patient: No patient ID returned');
+        toast.error('Failed to save patient: no patient_id returned');
         setIsSaving(false);
         return;
       }

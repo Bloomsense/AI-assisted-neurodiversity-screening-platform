@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
+import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 
 type EventType = 'session' | 'assessment' | null;
 
@@ -42,7 +43,7 @@ export default function EventSelection() {
         setLoadingChildren(true);
         const { data, error } = await supabase
           .from('patients')
-          .select('*')
+          .select(PATIENT_SELECT_COLUMNS)
           .order('name', { ascending: true });
 
         if (error) {
@@ -62,7 +63,7 @@ export default function EventSelection() {
             id: String(pid),
             name: String(row.name ?? 'Unnamed'),
             age: typeof row.age === 'number' ? row.age : null,
-            status: String(row.status ?? 'In Progress'),
+            status: String(row.status ?? 'active'),
             lastSession: last,
           };
         });

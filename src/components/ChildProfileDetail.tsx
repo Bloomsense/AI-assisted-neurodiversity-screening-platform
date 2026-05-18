@@ -33,6 +33,7 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { supabase } from '../utils/supabase/client';
+import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
 type PatientRow = {
@@ -119,9 +120,7 @@ export default function ChildProfileDetail() {
       setLoadingPatient(true);
       const { data, error } = await supabase
         .from('patients')
-        .select(
-          'patient_id, name, age, date_of_birth, gender, caregiver_name, caregiver_contact, remarks, status, profile_created_date, profile_tag, risk_level, assigned_doctor_id',
-        )
+        .select(PATIENT_SELECT_COLUMNS)
         .eq('patient_id', childId)
         .maybeSingle();
 

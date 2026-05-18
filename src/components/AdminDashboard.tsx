@@ -21,6 +21,7 @@ import {
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { toast } from 'sonner@2.0.3';
 import { supabase } from '../utils/supabase/client';
+import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 
 interface Patient {
   id: number;
@@ -68,7 +69,7 @@ export default function AdminDashboard() {
       // Fetch doctors, patients, and users directly from Supabase
       const [doctorsResult, patientsResult, usersResult] = await Promise.all([
         supabase.from('doctors').select('*'),
-        supabase.from('patients').select('*'),
+        supabase.from('patients').select(PATIENT_SELECT_COLUMNS),
         supabase.from('users').select('user_id,email')
       ]);
 
@@ -126,7 +127,7 @@ export default function AdminDashboard() {
           }
 
           formatted_patients.push({
-            id: patient.patient_id || patient.id,
+            id: patient.patient_id,
             name: patient.name || patient.patient_name || patient.full_name || 'Unknown',
             age: patient.age || patient.patient_age || 0,
             status: patient.status || patient.screening_status || 'In Progress',

@@ -16,6 +16,7 @@ import { ArrowLeft, Users, Settings,
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
+import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 import { getApiBaseUrl } from '../config';
 
 interface QuestionnaireQuestion {
@@ -103,7 +104,7 @@ export default function AdminSettings() {
     try {
       const { data, error } = await supabase
         .from('patients')
-        .select('*');
+        .select(PATIENT_SELECT_COLUMNS);
 
       if (error) {
         throw error;
@@ -555,7 +556,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
         if (err) { toast.error(err); return; }
       }
 
-      const hospitalIdToUuid = new Map<string, string>();
+      const patientIdMap = new Map<string, string>();
 
       // 1. Import patients (when type includes patient data)
       if (type === 'patients' || type === 'patients_full') {
@@ -587,22 +588,22 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
           const { data, error } = await supabase
             .from('patients')
             .upsert(p, { onConflict: 'patient_id', ignoreDuplicates: false })
-            .select('id, patient_id')
+            .select('patient_id')
             .single();
           if (error) {
             const { data: inserted, error: insertError } = await supabase
               .from('patients')
               .insert(p)
-              .select('id, patient_id')
+              .select('patient_id')
               .single();
-            if (inserted && inserted.id && p.patient_id) {
-              hospitalIdToUuid.set(p.patient_id, inserted.id);
+            if (inserted?.patient_id && p.patient_id) {
+              patientIdMap.set(p.patient_id, inserted.patient_id);
               importedPatients += 1;
             } else {
               importErrors.push(insertError?.message || error.message);
             }
-          } else if (data?.id && p.patient_id) {
-            hospitalIdToUuid.set(p.patient_id, data.id);
+          } else if (data?.patient_id && p.patient_id) {
+            patientIdMap.set(p.patient_id, data.patient_id);
             importedPatients += 1;
           }
         }
@@ -612,16 +613,16 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
       if (type === 'patients_assessments' || type === 'patients_sessions' || type === 'patients_full') {
         const { data: existing } = await supabase
           .from('patients')
-          .select('id, patient_id')
+          .select('patient_id')
           .not('patient_id', 'is', null);
-        (existing || []).forEach((p: { id: string; patient_id: string }) => {
-          hospitalIdToUuid.set(p.patient_id, p.id);
+        (existing || []).forEach((p: { patient_id: string }) => {
+          patientIdMap.set(p.patient_id, p.patient_id);
         });
 
         // Auto-create missing patients so assessment/session rows can still be imported.
         const uniqueHospitalIds = new Set(rows.map((r) => getRow(r, 'patient_id')).filter(Boolean));
         for (const hpId of uniqueHospitalIds) {
-          if (hospitalIdToUuid.has(hpId)) continue;
+          if (patientIdMap.has(hpId)) continue;
 
           const sourceRow = rows.find((r) => getRow(r, 'patient_id') === hpId);
           const fallbackAge = sourceRow ? parseInt(getRow(sourceRow, 'age'), 10) : NaN;
@@ -640,15 +641,15 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
           const { data: created, error: createErr } = await supabase
             .from('patients')
             .upsert(fallbackPatient, { onConflict: 'patient_id', ignoreDuplicates: false })
-            .select('id, patient_id')
+            .select('patient_id')
             .single();
 
-          if (createErr || !created?.id) {
+          if (createErr || !created?.patient_id) {
             importErrors.push(`Patient auto-create for patient_id "${hpId}" failed: ${createErr?.message || 'Unknown error'}`);
             continue;
           }
 
-          hospitalIdToUuid.set(hpId, created.id);
+          patientIdMap.set(hpId, created.patient_id);
           importedPatients += 1;
         }
       }
@@ -657,7 +658,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
       if (type === 'patients_assessments' || type === 'patients_full') {
         for (const row of rows) {
           const hpId = getRow(row, 'patient_id');
-          const patientId = hospitalIdToUuid.get(hpId);
+          const patientId = patientIdMap.get(hpId);
           if (!patientId) {
             skippedRows += 1;
             continue;
@@ -697,7 +698,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
       if (type === 'patients_sessions' || type === 'patients_full') {
         for (const row of rows) {
           const hpId = getRow(row, 'patient_id');
-          const patientId = hospitalIdToUuid.get(hpId);
+          const patientId = patientIdMap.get(hpId);
           if (!patientId) {
             skippedRows += 1;
             continue;
