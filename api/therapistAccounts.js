@@ -42,6 +42,32 @@ function registerTherapistAccountRoutes({ app, requireSupabase, sendJson, getSup
     }
   });
 
+  // Get one therapist by employee_id
+  app.get('/api/therapists/:employeeId', async (req, res) => {
+    if (!requireSupabase(res)) return;
+    const supabase = getSupabase();
+    const { employeeId } = req.params;
+
+    try {
+      const { data, error } = await supabase
+        .from(TABLE)
+        .select(SELECT_COLUMNS)
+        .eq('employee_id', employeeId)
+        .single();
+
+      if (error) {
+        const notFound = error.code === 'PGRST116';
+        return sendJson(res, notFound ? 404 : 500, {
+          success: false,
+          error: notFound ? 'Therapist not found' : error.message,
+        });
+      }
+      return sendJson(res, 200, { success: true, data });
+    } catch (error) {
+      return sendJson(res, 500, { success: false, error: error.message || 'Failed to fetch therapist' });
+    }
+  });
+
   // Create therapist account row
   app.post('/api/therapists', async (req, res) => {
     if (!requireSupabase(res)) return;

@@ -273,34 +273,48 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     created_at: row.created_at || '',
   });
 
+  const getPatientCountsByDoctor = async (): Promise<Record<string, number>> => {
+    const { data: patientsData, error: patientsError } = await supabase
+      .from('patients')
+      .select('assigned_doctor_id');
+    if (patientsError) throw patientsError;
+
+    const patientCounts: Record<string, number> = {};
+    (patientsData || []).forEach((p: any) => {
+      const key = String(p.assigned_doctor_id || '').trim();
+      if (!key) return;
+      patientCounts[key] = (patientCounts[key] || 0) + 1;
+    });
+    return patientCounts;
+  };
+
+  const enrichTherapistWithPatientCount = (
+    therapist: TherapistAccount,
+    patientCounts: Record<string, number>
+  ): TherapistAccount => ({
+    ...therapist,
+    patients: patientCounts[therapist.employee_id] ?? therapist.patients ?? 0,
+  });
+
   const fetchTherapists = async () => {
     try {
       const result = await assessmentToolsRequest<any[]>('/api/therapists');
       const rows = Array.isArray(result.data) ? result.data : [];
       const mapped = rows.map(mapTherapist);
+      const patientCounts = await getPatientCountsByDoctor();
 
-      // Keep patient numbers accurate by counting assignments from patients table.
-      const { data: patientsData, error: patientsError } = await supabase
-        .from('patients')
-        .select('assigned_doctor_id');
-      if (patientsError) throw patientsError;
-
-      const patientCounts: Record<string, number> = {};
-      (patientsData || []).forEach((p: any) => {
-        const key = String( p.assigned_doctor_id || '').trim();
-        if (!key) return;
-        patientCounts[key] = (patientCounts[key] || 0) + 1;
-      });
-
-      setTherapistAccounts(
-        mapped.map((t) => ({
-          ...t,
-          patients: patientCounts[t.employee_id] ?? t.patients ?? 0,
-        }))
-      );
+      setTherapistAccounts(mapped.map((t) => enrichTherapistWithPatientCount(t, patientCounts)));
     } catch (error: any) {
       toast.error(`Failed to load therapist accounts: ${error.message}`);
     }
+  };
+
+  const fetchTherapistById = async (employeeId: string): Promise<TherapistAccount> => {
+    const result = await assessmentToolsRequest<any>(`/api/therapists/${encodeURIComponent(employeeId)}`);
+    const row = result.data;
+    if (!row) throw new Error('Therapist not found');
+    const patientCounts = await getPatientCountsByDoctor();
+    return enrichTherapistWithPatientCount(mapTherapist(row), patientCounts);
   };
 
   const fetchTotalChildren = async () => {
@@ -320,18 +334,29 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     toast.info('Add therapist form will be added next.');
   };
 
-  const handleSaveTherapistDetails = (employeeId: string, details: TherapistAccount) => {
-    setTherapistAccounts((prev) =>
-      prev.map((t) =>
-        t.employee_id === employeeId
-          ? {
-              ...details,
-              patients: details.active_patients ?? details.patients ?? t.patients,
-            }
-          : t
-      )
+  const handleSaveTherapistDetails = async (employeeId: string, details: TherapistAccount) => {
+    const result = await assessmentToolsRequest<any>(
+      `/api/therapists/${encodeURIComponent(employeeId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: details.name,
+          email: details.email,
+          contact_number: details.contact_number,
+          occupation: details.role,
+          branch_name: details.branch_name,
+          status: details.status,
+        }),
+      }
     );
-    toast.success('Therapist details updated (frontend preview).');
+
+    const patientCounts = await getPatientCountsByDoctor();
+    const updated = enrichTherapistWithPatientCount(mapTherapist(result.data), patientCounts);
+
+    setTherapistAccounts((prev) =>
+      prev.map((t) => (t.employee_id === employeeId ? updated : t))
+    );
+    toast.success('Therapist details saved.');
   };
 
   const handleToggleStatus = async (employeeId: string, currentStatus: string) => {
@@ -767,6 +792,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
               therapistAccounts={therapistAccounts}
               onAddTherapist={handleAddTherapist}
               onToggleStatus={handleToggleStatus}
+              onLoadTherapistDetails={fetchTherapistById}
               onSaveTherapistDetails={handleSaveTherapistDetails}
             />
             </TabsContent>

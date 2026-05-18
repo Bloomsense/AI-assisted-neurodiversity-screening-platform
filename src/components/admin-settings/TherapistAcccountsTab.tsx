@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -7,7 +7,8 @@ import { Badge } from '../ui/badge';
 import { Switch } from '../ui/switch';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { Edit } from 'lucide-react';
+import { Edit, Loader2 } from 'lucide-react';
+import { toast } from 'sonner@2.0.3';
 
 export interface TherapistAccount {
   employee_id: string;
@@ -29,7 +30,8 @@ interface TherapistAcccountsTabProps {
   therapistAccounts: TherapistAccount[];
   onAddTherapist: () => void;
   onToggleStatus: (doctorId: string, currentStatus: string) => void;
-  onSaveTherapistDetails: (employeeId: string, details: TherapistAccount) => void;
+  onLoadTherapistDetails: (employeeId: string) => Promise<TherapistAccount>;
+  onSaveTherapistDetails: (employeeId: string, details: TherapistAccount) => Promise<void>;
 }
 
 const emptyDraft = (): TherapistAccount => ({
@@ -51,36 +53,71 @@ const emptyDraft = (): TherapistAccount => ({
 export default function TherapistAcccountsTab({
   therapistAccounts,
   onToggleStatus,
+  onLoadTherapistDetails,
   onSaveTherapistDetails,
 }: TherapistAcccountsTabProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<TherapistAccount>(emptyDraft());
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const openEditModal = (therapist: TherapistAccount) => {
-    setDraft({ ...therapist });
+  const openEditModal = async (therapist: TherapistAccount) => {
     setEditOpen(true);
+    setIsLoadingDetails(true);
+    setDraft({ ...therapist });
+    try {
+      const fresh = await onLoadTherapistDetails(therapist.employee_id);
+      setDraft(fresh);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to load therapist details');
+      setEditOpen(false);
+    } finally {
+      setIsLoadingDetails(false);
+    }
   };
+
+  useEffect(() => {
+    if (!editOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [editOpen]);
 
   const updateDraft = (key: keyof TherapistAccount, value: string | number) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSave = () => {
-    if (!draft.employee_id || !draft.name.trim() || !draft.email.trim()) return;
-    onSaveTherapistDetails(draft.employee_id, {
-      ...draft,
-      name: draft.name.trim(),
-      email: draft.email.trim(),
-      role: draft.role.trim() || 'Therapist',
-      contact_number: draft.contact_number?.trim() || '',
-      branch_name: draft.branch_name?.trim() || '',
-    });
-    setEditOpen(false);
+  const handleSave = async () => {
+    if (!draft.employee_id || !draft.name.trim() || !draft.email.trim()) {
+      toast.error('Name and email are required.');
+      return;
+    }
+    if (!draft.contact_number?.trim() || !draft.role.trim() || !draft.branch_name?.trim()) {
+      toast.error('Contact number, occupation, and branch name are required.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await onSaveTherapistDetails(draft.employee_id, {
+        ...draft,
+        name: draft.name.trim(),
+        email: draft.email.trim(),
+        role: draft.role.trim() || 'Therapist',
+        contact_number: draft.contact_number.trim(),
+        branch_name: draft.branch_name.trim(),
+      });
+      setEditOpen(false);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to save therapist details');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  // Modal rendered via Portal — escapes any parent overflow/transform/clip
-  const modal = editOpen
-    ? createPortal(
+  const editModalContent = (
         <div
           style={{
             position: 'fixed',
@@ -113,9 +150,24 @@ export default function TherapistAcccountsTab({
               Edit Therapist Details
             </h3>
             <p style={{ marginTop: '0.25rem', fontSize: '0.875rem', color: '#4b5563' }}>
-              Update doctor profile fields. Changes are saved in this session (frontend preview).
+              Update doctor profile fields in the database.
             </p>
 
+            {isLoadingDetails ? (
+              <div
+                style={{
+                  marginTop: '2rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  color: '#4b5563',
+                }}
+              >
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Loading therapist details...</span>
+              </div>
+            ) : (
             <div
               style={{
                 marginTop: '1.25rem',
@@ -134,13 +186,18 @@ export default function TherapistAcccountsTab({
               </div>
               <div>
                 <Label>Name</Label>
-                <Input value={draft.name} onChange={(e) => updateDraft('name', e.target.value)} />
+                <Input
+                  value={draft.name}
+                  disabled={isSaving}
+                  onChange={(e) => updateDraft('name', e.target.value)}
+                />
               </div>
               <div>
                 <Label>Email</Label>
                 <Input
                   type="email"
                   value={draft.email}
+                  disabled={isSaving}
                   onChange={(e) => updateDraft('email', e.target.value)}
                 />
               </div>
@@ -148,17 +205,23 @@ export default function TherapistAcccountsTab({
                 <Label>Contact Number</Label>
                 <Input
                   value={draft.contact_number || ''}
+                  disabled={isSaving}
                   onChange={(e) => updateDraft('contact_number', e.target.value)}
                 />
               </div>
               <div>
                 <Label>Occupation</Label>
-                <Input value={draft.role} onChange={(e) => updateDraft('role', e.target.value)} />
+                <Input
+                  value={draft.role}
+                  disabled={isSaving}
+                  onChange={(e) => updateDraft('role', e.target.value)}
+                />
               </div>
               <div>
                 <Label>Branch Name</Label>
                 <Input
                   value={draft.branch_name || ''}
+                  disabled={isSaving}
                   onChange={(e) => updateDraft('branch_name', e.target.value)}
                 />
               </div>
@@ -173,6 +236,7 @@ export default function TherapistAcccountsTab({
                     backgroundColor: '#ffffff',
                   }}
                   value={draft.status}
+                  disabled={isSaving}
                   onChange={(e) => updateDraft('status', e.target.value)}
                 >
                   <option value="active">active</option>
@@ -184,6 +248,7 @@ export default function TherapistAcccountsTab({
                 <Input value={draft.created_at || ''} disabled className="bg-gray-50" />
               </div>
             </div>
+            )}
 
             <div
               style={{
@@ -194,16 +259,27 @@ export default function TherapistAcccountsTab({
                 gap: '0.75rem',
               }}
             >
-              <Button variant="outline" onClick={() => setEditOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setEditOpen(false)}
+                disabled={isSaving || isLoadingDetails}
+              >
                 Cancel
               </Button>
-              <Button onClick={handleSave}>Save Changes</Button>
+              <Button onClick={handleSave} disabled={isSaving || isLoadingDetails}>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </Button>
             </div>
           </div>
-        </div>,
-        document.body
-      )
-    : null;
+        </div>
+  );
 
   return (
     <>
@@ -251,7 +327,7 @@ export default function TherapistAcccountsTab({
         </CardContent>
       </Card>
 
-      {modal}
+      {editOpen && createPortal(editModalContent, document.body)}
     </>
   );
 }
