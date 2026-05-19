@@ -1,5 +1,6 @@
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import type { EventFlowState } from '../utils/supabase/timelineEvents';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -8,12 +9,13 @@ import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df
 
 export default function QuestionnaireSelection() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { childId } = useParams();
+  const flowState = (location.state as EventFlowState | null) ?? {};
 
   const handleSelect = (type: 'mchat' | 'neurodiversity') => {
-    // Navigate to the screening workflow with the selected questionnaire type
     const basePath = childId ? `/therapist/screening/${childId}` : '/therapist/screening';
-    navigate(`${basePath}?type=${type}`);
+    navigate(`${basePath}?type=${type}`, { state: flowState });
   };
 
   return (

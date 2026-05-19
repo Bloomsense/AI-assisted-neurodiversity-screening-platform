@@ -7,7 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Download, FileText, Home, Loader2 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
-import { supabase } from '../utils/supabase/client';
+import { saveAssessmentAndLinkTimeline } from '../utils/supabase/timelineEvents';
 
 interface MChatQuestion {
   id: string;
@@ -21,6 +21,7 @@ interface ScreeningResultsProps {
   behaviorNotes?: string;
   childId?: string;
   questionnaireType?: 'mchat' | 'neurodiversity';
+  timelineEventId?: string;
 }
 
 export default function ScreeningResults() {
@@ -70,39 +71,23 @@ export default function ScreeningResults() {
         });
 
         const failCount = passFailResults.filter((r) => r.result === 'Fail').length;
-        const passCount = passFailResults.filter((r) => r.result === 'Pass').length;
-        const totalQuestions = mchatQuestions.length;
         const isScreenPositive = failCount >= 2;
         const riskLevel = isScreenPositive ? 'High Risk' : 'Low Risk';
 
-        // Prepare assessment data
-        const assessmentData = {
-          patient_id: childId,
-          questionnaire_type: questionnaireType,
-          mchat_answers: mchatAnswers,
-          mchat_questions: mchatQuestions,
-          behavior_notes: behaviorNotes || null,
-          total_questions: totalQuestions,
-          pass_count: passCount,
-          fail_count: failCount,
-          risk_level: riskLevel,
-          screen_positive: isScreenPositive,
-        };
-
-        // Insert into Supabase assessments table
-        const { data, error } = await supabase
-          .from('assessments')
-          .insert([assessmentData])
-          .select()
-          .single();
+        const { assessmentId: savedId, error } = await saveAssessmentAndLinkTimeline({
+          patientId: childId,
+          totalScore: failCount,
+          riskLevel,
+          notes: behaviorNotes?.trim() || null,
+          questionnaireType,
+          timelineEventId: results.timelineEventId,
+        });
 
         if (error) {
           console.error('Error saving assessment:', error);
-          // Don't show error to user as results are still displayed
-          // toast.error(`Failed to save assessment: ${error.message}`);
-        } else if (data && data.id) {
-          setAssessmentId(data.id);
-          console.log('Assessment saved successfully:', data.id);
+          toast.error(`Failed to save assessment: ${error.message}`);
+        } else if (savedId) {
+          setAssessmentId(savedId);
         }
       } catch (error: any) {
         console.error('Error saving assessment:', error);

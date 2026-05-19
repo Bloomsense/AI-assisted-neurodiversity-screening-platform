@@ -10,6 +10,7 @@ import { ArrowLeft, Save, PlayCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
+import { resolveLoggedInDoctorId } from '../utils/supabase/doctorProfile';
 
 function buildCaregiverContact(phone: string, email: string): string | null {
   const p = phone.trim();
@@ -80,7 +81,7 @@ export default function CreateChildProfile() {
     setIsSaving(true);
 
     try {
-      const assignedDoctorId = await resolveAssignedDoctorId();
+      const assignedDoctorId = await resolveLoggedInDoctorId();
       const today = new Date().toISOString().slice(0, 10);
 
       const patientData: Record<string, unknown> = {

@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
+import { resolveLoggedInDoctorId } from '../utils/supabase/doctorProfile';
 import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 
 type EventType = 'session' | 'assessment' | null;
@@ -90,41 +91,52 @@ export default function EventSelection() {
     setStarting(true);
 
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const doctorId = authData.user?.id ?? null;
+      const doctorEmployeeId = await resolveLoggedInDoctorId();
+      if (!doctorEmployeeId) {
+        toast.error(
+          'Could not find your therapist profile (employee ID). Please sign in again or contact admin.',
+        );
+        return;
+      }
 
       const eventTitle =
         selectedEventType === 'assessment' ? 'Assessment started' : 'Session started';
-      const eventDescription = `${eventTitle} for ${child?.name ?? 'patient'} from Start New Event.`;
 
       const row = {
         patient_id: selectedChild,
         event_type: selectedEventType,
         event_title: eventTitle,
-        event_description: eventDescription,
         event_date: new Date().toISOString(),
-        created_by_doctor_id: doctorId,
+        created_by_doctor_id: doctorEmployeeId,
         related_assessment_id: null,
         related_session_id: null,
       };
 
-      const { error } = await supabase.from('timeline_events').insert([row]);
+      const { data: timelineRow, error } = await supabase
+        .from('timeline_events')
+        .insert([row])
+        .select('event_id')
+        .single();
 
       if (error) {
         console.error('timeline_events insert:', error);
         toast.warning(`Event started, but timeline log failed: ${error.message}`);
       }
+
+      const timelineEventId = timelineRow?.event_id as string | undefined;
+      const flowState = timelineEventId ? { timelineEventId } : undefined;
+
+      if (selectedEventType === 'assessment') {
+        navigate(`/therapist/questionnaire-selection/${selectedChild}`, { state: flowState });
+      } else {
+        navigate(`/therapist/session/${selectedChild}`, { state: flowState });
+      }
+      return;
     } catch (e) {
       console.error(e);
       toast.warning('Could not write timeline event');
     } finally {
       setStarting(false);
-    }
-
-    if (selectedEventType === 'assessment') {
-      navigate(`/therapist/questionnaire-selection/${selectedChild}`);
-    } else {
-      navigate(`/therapist/session/${selectedChild}`);
     }
   };
 
