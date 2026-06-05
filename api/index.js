@@ -4,6 +4,9 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+const { registerTherapistAccountRoutes } = require('./therapistAccounts');
+const { registerDataImportRoutes } = require('./dataImport');
+const { registerPatientAssignmentRoutes } = require('./patientAssignments');
 
 const app = express();
 
@@ -92,6 +95,28 @@ app.get('/api/health', (req, res) => {
     message: 'Node.js API is running',
     supabaseConfigured: !!(supabase && looksLikeHttpApiUrl(SUPABASE_URL)),
   });
+});
+
+// Therapist Accounts (doctors table)
+registerTherapistAccountRoutes({
+  app,
+  requireSupabase,
+  sendJson,
+  getSupabase: () => supabase,
+});
+
+registerDataImportRoutes({
+  app,
+  requireSupabase,
+  sendJson,
+  getSupabase: () => supabase,
+});
+
+registerPatientAssignmentRoutes({
+  app,
+  requireSupabase,
+  sendJson,
+  getSupabase: () => supabase,
 });
 
 // Assessment Tools - Get all questionnaires with questions

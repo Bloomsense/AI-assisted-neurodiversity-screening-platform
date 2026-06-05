@@ -12,37 +12,6 @@ import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df
 import { supabase } from '../utils/supabase/client';
 import { resolveLoggedInDoctorId } from '../utils/supabase/doctorProfile';
 
-function buildCaregiverContact(phone: string, email: string): string | null {
-  const p = phone.trim();
-  const e = email.trim();
-  if (p && e) return `${p} | ${e}`;
-  return p || e || null;
-}
-
-/** Map form labels to `gender_type` enum values in Supabase (adjust if your enum differs). */
-function toGenderEnum(value: string): string | null {
-  if (!value) return null;
-  const map: Record<string, string> = {
-    Male: 'male',
-    Female: 'female',
-    Other: 'other',
-  };
-  return map[value] ?? value.toLowerCase();
-}
-
-async function resolveAssignedDoctorId(): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const { data: doctor } = await supabase
-    .from('doctors')
-    .select('doctor_id')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  return doctor?.doctor_id ?? user.id;
-}
-
 export default function CreateChildProfile() {
   const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
@@ -73,11 +42,6 @@ export default function CreateChildProfile() {
       return;
     }
 
-    if (formData.contactInfo.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.contactInfo.trim())) {
-      toast.error('Please enter a valid contact email');
-      return;
-    }
-
     setIsSaving(true);
 
     try {
@@ -87,22 +51,17 @@ export default function CreateChildProfile() {
       const patientData: Record<string, unknown> = {
         name: formData.childName.trim(),
         age: ageNum,
-        date_of_birth: null,
-        gender: toGenderEnum(formData.gender),
+        gender: formData.gender || null,
         caregiver_name: formData.caregiverName.trim(),
-        caregiver_contact: buildCaregiverContact(formData.caregiverPhone, formData.contactInfo),
+        caregiver_contact: formData.caregiverPhone.trim() || null,
         remarks: formData.remarks.trim() || null,
-        profile_created_date: today,
       };
 
-      if (assignedDoctorId) {
-        patientData.assigned_doctor_id = assignedDoctorId;
-      }
-
+      // Insert into Supabase patients table
       const { data, error } = await supabase
         .from('patients')
         .insert([patientData])
-        .select('patient_id')
+        .select()
         .single();
 
       if (error) {
@@ -112,12 +71,13 @@ export default function CreateChildProfile() {
         return;
       }
 
-      const childId = data?.patient_id;
-      if (!childId) {
-        toast.error('Failed to save patient: no patient_id returned');
+      if (!data || !data.patient_id) {
+        toast.error('Failed to save patient: No data returned');
         setIsSaving(false);
         return;
       }
+
+      const childId = data.patient_id;
       toast.success('Child profile created successfully');
 
       if (startScreening) {
@@ -200,10 +160,10 @@ export default function CreateChildProfile() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="contactInfo">Contact Email</Label>
+                  <Label htmlFor="contactInfo">Contact Information</Label>
                   <Input
                     id="contactInfo"
-                    placeholder="Enter contact email"
+                    placeholder="Email or additional contact info"
                     value={formData.contactInfo}
                     onChange={(e) => handleInputChange('contactInfo', e.target.value)}
                   />

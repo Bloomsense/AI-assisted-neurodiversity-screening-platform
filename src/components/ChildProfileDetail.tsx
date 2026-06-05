@@ -17,7 +17,6 @@ import {
   Phone, 
   PlayCircle,
   FileText,
-  Lightbulb,
   CheckCircle,
   AlertCircle,
   Clock,
@@ -33,7 +32,6 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { supabase } from '../utils/supabase/client';
-import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
 type PatientRow = {
@@ -170,43 +168,12 @@ export default function ChildProfileDetail() {
   // Load comments, meetings, and latest assessment on component mount
   useEffect(() => {
     if (childId) {
-      loadPatient();
       loadComments();
       loadMeetings();
       loadAssessmentHistory();
       loadSessionHistory();
     }
   }, [childId]);
-
-  const loadPatient = async () => {
-    if (!childId) return;
-    try {
-      setLoadingPatient(true);
-      const { data, error } = await supabase
-        .from('patients')
-        .select(PATIENT_SELECT_COLUMNS)
-        .eq('patient_id', childId)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error loading patient:', error);
-        toast.error('Failed to load child profile');
-        return;
-      }
-
-      if (data) {
-        setPatient(data as PatientRow);
-        setCustomTag(data.profile_tag || data.status || 'In Progress');
-      } else {
-        toast.error('Child profile not found');
-      }
-    } catch (error) {
-      console.error('Error loading patient:', error);
-      toast.error('Failed to load child profile');
-    } finally {
-      setLoadingPatient(false);
-    }
-  };
 
   const loadComments = async () => {
     try {
@@ -521,7 +488,7 @@ export default function ChildProfileDetail() {
         body: JSON.stringify({
           date: meetingDate.toISOString().split('T')[0],
           time: meetingTime,
-          parentPhone: childData?.caregiverPhone ?? ''
+          parentPhone: childData.caregiverPhone
         })
       });
 
@@ -570,34 +537,6 @@ export default function ChildProfileDetail() {
     }
   };
 
-  if (loadingPatient) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-      </div>
-    );
-  }
-
-  if (!childData) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4 px-4">
-        <p className="text-gray-600">Child profile not found.</p>
-        <Button variant="outline" onClick={() => navigate('/therapist/dashboard')}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to dashboard
-        </Button>
-      </div>
-    );
-  }
-
-  const initials = childData.name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -629,7 +568,7 @@ export default function ChildProfileDetail() {
           <CardContent className="pt-6">
             <div className="flex items-start space-x-6">
               <Avatar className="h-20 w-20">
-                <AvatarFallback className="text-2xl">{initials}</AvatarFallback>
+                <AvatarFallback className="text-2xl">AK</AvatarFallback>
               </Avatar>
               <div className="flex-1">
                 <div className="flex items-center justify-between mb-2">
@@ -699,7 +638,6 @@ export default function ChildProfileDetail() {
                   <div className="flex items-center text-gray-600">
                     <Phone className="h-4 w-4 mr-2" />
                     {childData.caregiverPhone}
-                    {childData.caregiverEmail ? ` · ${childData.caregiverEmail}` : ''}
                   </div>
                 </div>
               </div>
@@ -742,10 +680,9 @@ export default function ChildProfileDetail() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
             <TabsTrigger value="comments">Comments</TabsTrigger>
             <TabsTrigger value="meetings">Follow-Up</TabsTrigger>
           </TabsList>
@@ -866,9 +803,7 @@ export default function ChildProfileDetail() {
                         <div className="flex justify-between">
                           <span className="text-sm text-gray-600">Last Assessment</span>
                           <span className="text-sm font-medium">
-                            {childData.lastAssessment
-                              ? new Date(childData.lastAssessment).toLocaleDateString()
-                              : 'No assessment yet'}
+                            {new Date(childData.lastAssessment).toLocaleDateString()}
                           </span>
                         </div>
                         <div className="flex justify-between">
@@ -926,53 +861,6 @@ export default function ChildProfileDetail() {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Recommendations Tab */}
-          <TabsContent value="recommendations">
-            <div className="space-y-6">
-              {recommendations.map((category) => (
-                <Card key={category.id}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <Lightbulb className="h-5 w-5 mr-2" />
-                        {category.category}
-                      </div>
-                      <Badge className={getPriorityColor(category.priority)}>
-                        {category.priority.toUpperCase()} PRIORITY
-                      </Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      {category.items.map((item, index) => (
-                        <li key={index} className="flex items-start space-x-2">
-                          <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm">{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-              ))}
-              
-              <Card className="bg-teal-50 border-teal-200">
-                <CardContent className="pt-6">
-                  <div className="flex items-start space-x-3">
-                    <img src={bloomSenseLogo} alt="BloomSense" className="h-6 w-6 mt-1" />
-                    <div>
-                      <h4 className="font-medium text-teal-900 mb-2">AI-Generated Insights</h4>
-                      <p className="text-sm text-teal-800">
-                        Based on the assessment results, Ahmad shows moderate risk indicators. 
-                        Early intervention focusing on communication and social skills is recommended. 
-                        The combination of structured activities and caregiver training should yield positive outcomes.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
 
           {/* Doctor's Comments Tab */}

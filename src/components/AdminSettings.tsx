@@ -16,8 +16,13 @@ import { ArrowLeft, Users, Settings,
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
-import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 import { getApiBaseUrl } from '../config';
+import TherapistAcccountsTab from './admin-settings/TherapistAcccountsTab';
+import AssessmentToolsTab from './admin-settings/AssessmentToolsTab';
+import DataManagementTab from './admin-settings/DataManagementTab';
+import SystemSettingsTab from './admin-settings/SystemSettingsTab';
+import type { TherapistAccount } from './admin-settings/TherapistAcccountsTab';
+
 
 interface QuestionnaireQuestion {
   id: string;
@@ -45,6 +50,8 @@ export default function AdminSettings() {
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const confirmDelete = () => window.confirm('Are you sure you want to delete this item');
+
   // Normalize CSV row keys (trim, lowercase, replace spaces with underscore)
   const normalizeKey = (key: string) => key.trim().toLowerCase().replace(/\s+/g, '_');
   const getRow = (row: Record<string, string>, key: string) => {
@@ -52,35 +59,7 @@ export default function AdminSettings() {
     return k ? (row[k]?.trim() ?? '') : '';
   };
 
-  const therapistAccounts = [
-    {
-      id: 1,
-      name: 'Dr. Sarah Ahmed',
-      email: 'sarah.ahmed@neurodetect.com',
-      role: 'Senior Therapist',
-      status: 'active',
-      patients: 24,
-      lastLogin: '2024-01-20'
-    },
-    {
-      id: 2,
-      name: 'Dr. Ali Hassan',
-      email: 'ali.hassan@neurodetect.com',
-      role: 'Therapist',
-      status: 'active',
-      patients: 18,
-      lastLogin: '2024-01-19'
-    },
-    {
-      id: 3,
-      name: 'Dr. Fatima Khan',
-      email: 'fatima.khan@neurodetect.com',
-      role: 'Therapist',
-      status: 'inactive',
-      patients: 12,
-      lastLogin: '2024-01-15'
-    }
-  ];
+  const [therapistAccounts, setTherapistAccounts] = useState<TherapistAccount[]>([]);
 
   const [questionnaires, setQuestionnaires] = useState<Questionnaire[]>([]);
   const [selectedQuestionnaireId, setSelectedQuestionnaireId] = useState('');
@@ -90,21 +69,19 @@ export default function AdminSettings() {
   const [newQuestionScore, setNewQuestionScore] = useState('1');
   const [newQuestionCritical, setNewQuestionCritical] = useState(false);
   const [isLoadingQuestionnaires, setIsLoadingQuestionnaires] = useState(false);
-
-  const systemStats = {
-    totalChildren: 156,
-    totalTherapists: 8,
-    totalCaregivers: 142,
-    completedScreenings: 89,
-    pendingAssessments: 23
-  };
-
+  const [totalChildren, setTotalChildren] = useState(0);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTargetLabel, setConfirmTargetLabel] = useState('');
+  const [pendingDeleteType, setPendingDeleteType] = useState<'questionnaire' | 'question' | null>(null);
+  const [pendingDeleteQuestionnaireId, setPendingDeleteQuestionnaireId] = useState<string | null>(null);
+  const [pendingDeleteQuestionId, setPendingDeleteQuestionId] = useState<string | null>(null);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
   // Fetch patient data from Supabase
   const fetchPatients = async () => {
     try {
       const { data, error } = await supabase
         .from('patients')
-        .select(PATIENT_SELECT_COLUMNS);
+        .select('*');
 
       if (error) {
         throw error;
@@ -280,13 +257,122 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     }
   };
 
-  const handleAddTherapist = () => {
-    toast.success('Therapist invitation sent successfully');
+  const mapTherapist = (row: any): TherapistAccount => ({
+    employee_id: String(row.employee_id || ''),
+    user_id: row.user_id ? String(row.user_id) : '',
+    name: row.name || 'Unknown',
+    email: row.email || 'N/A',
+    role: row.occupation || 'Therapist',
+    status: row.status || 'active',
+    patients: row.active_patients || 0,
+    contact_number: row.contact_number || '',
+    branch_name: row.branch_name || '',
+    active_patients: row.active_patients ?? 0,
+    upcoming_sessions: row.upcoming_sessions ?? 0,
+    pending_assignments: row.pending_assignments ?? 0,
+    created_at: row.created_at || '',
+  });
+
+  const getPatientCountsByDoctor = async (): Promise<Record<string, number>> => {
+    const { data: patientsData, error: patientsError } = await supabase
+      .from('patients')
+      .select('assigned_doctor_id');
+    if (patientsError) throw patientsError;
+
+    const patientCounts: Record<string, number> = {};
+    (patientsData || []).forEach((p: any) => {
+      const key = String(p.assigned_doctor_id || '').trim();
+      if (!key) return;
+      patientCounts[key] = (patientCounts[key] || 0) + 1;
+    });
+    return patientCounts;
   };
 
-  const handleToggleStatus = (therapistId: number, currentStatus: string) => {
+  const enrichTherapistWithPatientCount = (
+    therapist: TherapistAccount,
+    patientCounts: Record<string, number>
+  ): TherapistAccount => ({
+    ...therapist,
+    patients: patientCounts[therapist.employee_id] ?? therapist.patients ?? 0,
+  });
+
+  const fetchTherapists = async () => {
+    try {
+      const result = await assessmentToolsRequest<any[]>('/api/therapists');
+      const rows = Array.isArray(result.data) ? result.data : [];
+      const mapped = rows.map(mapTherapist);
+      const patientCounts = await getPatientCountsByDoctor();
+
+      setTherapistAccounts(mapped.map((t) => enrichTherapistWithPatientCount(t, patientCounts)));
+    } catch (error: any) {
+      toast.error(`Failed to load therapist accounts: ${error.message}`);
+    }
+  };
+
+  const fetchTherapistById = async (employeeId: string): Promise<TherapistAccount> => {
+    const result = await assessmentToolsRequest<any>(`/api/therapists/${encodeURIComponent(employeeId)}`);
+    const row = result.data;
+    if (!row) throw new Error('Therapist not found');
+    const patientCounts = await getPatientCountsByDoctor();
+    return enrichTherapistWithPatientCount(mapTherapist(row), patientCounts);
+  };
+
+  const fetchTotalChildren = async () => {
+    try {
+      const { count, error } = await supabase
+        .from('patients')
+        .select('*', { count: 'exact', head: true });
+      if (error) throw error;
+      setTotalChildren(count ?? 0);
+    } catch (error: any) {
+      toast.error(`Failed to load patient count: ${error.message}`);
+      setTotalChildren(0);
+    }
+  };
+
+  const handleAddTherapist = () => {
+    toast.info('Add therapist form will be added next.');
+  };
+
+  const handleSaveTherapistDetails = async (employeeId: string, details: TherapistAccount) => {
+    const result = await assessmentToolsRequest<any>(
+      `/api/therapists/${encodeURIComponent(employeeId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: details.name,
+          email: details.email,
+          contact_number: details.contact_number,
+          occupation: details.role,
+          branch_name: details.branch_name,
+          status: details.status,
+        }),
+      }
+    );
+
+    const patientCounts = await getPatientCountsByDoctor();
+    const updated = enrichTherapistWithPatientCount(mapTherapist(result.data), patientCounts);
+
+    setTherapistAccounts((prev) =>
+      prev.map((t) => (t.employee_id === employeeId ? updated : t))
+    );
+    toast.success('Therapist details saved.');
+  };
+
+  const handleToggleStatus = async (employeeId: string, currentStatus: string) => {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-    toast.success(`Therapist status updated to ${newStatus}`);
+    try {
+      await assessmentToolsRequest(`/api/therapists/${employeeId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus }),
+      });
+      setTherapistAccounts((prev) =>
+        prev.map((t) => (t.employee_id === employeeId ? { ...t, status: newStatus } : t))
+      );
+      toast.success(`Therapist status updated to ${newStatus}`);
+    } catch (error: any) {
+      toast.error(`Failed to update therapist status: ${error.message}`);
+    }
   };
 
   type AssessmentToolsOk<T = unknown> = { success: true; data?: T };
@@ -374,7 +460,15 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
 
   useEffect(() => {
     fetchQuestionnaires();
+    fetchTherapists();
+    fetchTotalChildren();
   }, []);
+
+  const systemStats = {
+    totalChildren,
+    totalTherapists: therapistAccounts.length,
+    totalQuestionaires: questionnaires.length,
+  };
 
   const selectedQuestionnaire = questionnaires.find((q) => q.id === selectedQuestionnaireId) || null;
 
@@ -415,7 +509,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     }
   };
 
-  const handleDeleteQuestionnaire = async (questionnaireId: string) => {
+  const performDeleteQuestionnaire = async (questionnaireId: string) => {
     const target = questionnaires.find((q) => q.id === questionnaireId);
     if (!target) return;
 
@@ -470,7 +564,7 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     }
   };
 
-  const handleDeleteQuestion = async (questionnaireId: string, questionId: string) => {
+  const performDeleteQuestion = async (questionId: string) => {
     try {
       await assessmentToolsRequest(`/api/assessment-tools/questions/${questionId}`, {
         method: 'DELETE',
@@ -480,6 +574,51 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
       await fetchQuestionnaires();
     } catch (error: any) {
       toast.error(`Failed to remove question: ${error.message}`);
+    }
+  };
+
+  const handleDeleteQuestionnaire = (questionnaireId: string) => {
+    const target = questionnaires.find((q) => q.id === questionnaireId);
+    if (!target) return;
+    setPendingDeleteType('questionnaire');
+    setPendingDeleteQuestionnaireId(questionnaireId);
+    setPendingDeleteQuestionId(null);
+    setConfirmTargetLabel(target.name || 'this questionnaire');
+    setConfirmOpen(true);
+  };
+
+  const handleDeleteQuestion = (questionnaireId: string, questionId: string) => {
+    const questionnaire = questionnaires.find((q) => q.id === questionnaireId);
+    const question = questionnaire?.questions.find((q) => q.id === questionId);
+    setPendingDeleteType('question');
+    setPendingDeleteQuestionnaireId(questionnaireId);
+    setPendingDeleteQuestionId(questionId);
+    setConfirmTargetLabel(question?.text || 'this question');
+    setConfirmOpen(true);
+  };
+
+  const onConfirmDelete = async () => {
+    if (!pendingDeleteType) return;
+
+    const deleteType = pendingDeleteType;
+    const questionnaireId = pendingDeleteQuestionnaireId;
+    const questionId = pendingDeleteQuestionId;
+
+    // Close immediately to avoid UI lock while network request runs.
+    setConfirmOpen(false);
+    setPendingDeleteType(null);
+    setPendingDeleteQuestionnaireId(null);
+    setPendingDeleteQuestionId(null);
+    setIsDeletingItem(true);
+
+    try {
+      if (deleteType === 'questionnaire' && questionnaireId) {
+        await performDeleteQuestionnaire(questionnaireId);
+      } else if (deleteType === 'question' && questionId) {
+        await performDeleteQuestion(questionId);
+      }
+    } finally {
+      setIsDeletingItem(false);
     }
   };
 
@@ -529,215 +668,32 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     setIsImporting(true);
     try {
       const rows = await parseCSVFile(file);
-      const type = importType;
-      let importedPatients = 0;
-      let importedAssessments = 0;
-      let importedSessions = 0;
-      let skippedRows = 0;
-      const importErrors: string[] = [];
+      const result = await assessmentToolsRequest<{
+        importedPatients: number;
+        importedAssessments: number;
+        importedSessions: number;
+        skippedRows: number;
+      }>('/api/data-import', {
+        method: 'POST',
+        body: JSON.stringify({
+          importType,
+          rows,
+        }),
+      });
 
-      // Required columns per import type
-      const patientsRequired = ['patient_id', 'name', 'age', 'gender', 'caregiver_contact'];
-      const assessmentsRequired = ['patient_id', 'total_score'];
-      const sessionsRequired = ['patient_id', 'session_date', 'session_notes'];
-      const fullRequired = ['patient_id', 'name', 'age', 'gender', 'caregiver_contact', 'total_score', 'session_date', 'session_notes'];
-
-      if (type === 'patients') {
-        const err = validateRequiredColumns(rows, patientsRequired);
-        if (err) { toast.error(err); return; }
-      } else if (type === 'patients_assessments') {
-        const err = validateRequiredColumns(rows, assessmentsRequired);
-        if (err) { toast.error(err); return; }
-      } else if (type === 'patients_sessions') {
-        const err = validateRequiredColumns(rows, sessionsRequired);
-        if (err) { toast.error(err); return; }
-      } else {
-        const err = validateRequiredColumns(rows, fullRequired);
-        if (err) { toast.error(err); return; }
-      }
-
-      const patientIdMap = new Map<string, string>();
-
-      // 1. Import patients (when type includes patient data)
-      if (type === 'patients' || type === 'patients_full') {
-        const seen = new Set<string>();
-        const patientRows = type === 'patients_full'
-          ? rows.filter((r) => {
-              const hpId = getRow(r, 'patient_id');
-              if (!hpId || seen.has(hpId)) return false;
-              seen.add(hpId);
-              return true;
-            })
-          : rows;
-
-        for (const row of patientRows) {
-          const hpId = getRow(row, 'patient_id');
-          const age = parseInt(getRow(row, 'age'), 10);
-          const p = {
-            patient_id: hpId || null,
-            name: getRow(row, 'name') || 'Unknown',
-            age: isNaN(age) ? 0 : age,
-            gender: getRow(row, 'gender') || null,
-            caregiver_name: getRow(row, 'caregiver_name') || getRow(row, 'caregiver_contact') || 'N/A',
-            caregiver_contact: getRow(row, 'caregiver_contact') || null,
-            date_of_birth: getRow(row, 'date_of_birth') || null,
-            remarks: getRow(row, 'remarks') || null,
-            status: getRow(row, 'status') || 'active',
-          };
-
-          const { data, error } = await supabase
-            .from('patients')
-            .upsert(p, { onConflict: 'patient_id', ignoreDuplicates: false })
-            .select('patient_id')
-            .single();
-          if (error) {
-            const { data: inserted, error: insertError } = await supabase
-              .from('patients')
-              .insert(p)
-              .select('patient_id')
-              .single();
-            if (inserted?.patient_id && p.patient_id) {
-              patientIdMap.set(p.patient_id, inserted.patient_id);
-              importedPatients += 1;
-            } else {
-              importErrors.push(insertError?.message || error.message);
-            }
-          } else if (data?.patient_id && p.patient_id) {
-            patientIdMap.set(p.patient_id, data.patient_id);
-            importedPatients += 1;
-          }
-        }
-      }
-
-      // 2. Build patient_id -> uuid map (for assessments/sessions - patients must exist)
-      if (type === 'patients_assessments' || type === 'patients_sessions' || type === 'patients_full') {
-        const { data: existing } = await supabase
-          .from('patients')
-          .select('patient_id')
-          .not('patient_id', 'is', null);
-        (existing || []).forEach((p: { patient_id: string }) => {
-          patientIdMap.set(p.patient_id, p.patient_id);
-        });
-
-        // Auto-create missing patients so assessment/session rows can still be imported.
-        const uniqueHospitalIds = new Set(rows.map((r) => getRow(r, 'patient_id')).filter(Boolean));
-        for (const hpId of uniqueHospitalIds) {
-          if (patientIdMap.has(hpId)) continue;
-
-          const sourceRow = rows.find((r) => getRow(r, 'patient_id') === hpId);
-          const fallbackAge = sourceRow ? parseInt(getRow(sourceRow, 'age'), 10) : NaN;
-          const fallbackPatient = {
-            patient_id: hpId,
-            name: sourceRow ? getRow(sourceRow, 'name') || `Patient ${hpId}` : `Patient ${hpId}`,
-            age: isNaN(fallbackAge) ? 0 : fallbackAge,
-            gender: sourceRow ? getRow(sourceRow, 'gender') || null : null,
-            caregiver_name: sourceRow ? getRow(sourceRow, 'caregiver_name') || getRow(sourceRow, 'caregiver_contact') || 'N/A' : 'N/A',
-            caregiver_contact: sourceRow ? getRow(sourceRow, 'caregiver_contact') || null : null,
-            date_of_birth: sourceRow ? getRow(sourceRow, 'date_of_birth') || null : null,
-            remarks: sourceRow ? getRow(sourceRow, 'remarks') || 'Auto-created during CSV import' : 'Auto-created during CSV import',
-            status: sourceRow ? getRow(sourceRow, 'status') || 'active' : 'active',
-          };
-
-          const { data: created, error: createErr } = await supabase
-            .from('patients')
-            .upsert(fallbackPatient, { onConflict: 'patient_id', ignoreDuplicates: false })
-            .select('patient_id')
-            .single();
-
-          if (createErr || !created?.patient_id) {
-            importErrors.push(`Patient auto-create for patient_id "${hpId}" failed: ${createErr?.message || 'Unknown error'}`);
-            continue;
-          }
-
-          patientIdMap.set(hpId, created.patient_id);
-          importedPatients += 1;
-        }
-      }
-
-      // 3. Import assessments
-      if (type === 'patients_assessments' || type === 'patients_full') {
-        for (const row of rows) {
-          const hpId = getRow(row, 'patient_id');
-          const patientId = patientIdMap.get(hpId);
-          if (!patientId) {
-            skippedRows += 1;
-            continue;
-          }
-          const totalScore = parseInt(getRow(row, 'total_score'), 10);
-          if (isNaN(totalScore)) {
-            skippedRows += 1;
-            continue;
-          }
-
-          const assessmentData: Record<string, unknown> = {
-            patient_id: patientId,
-            total_score: totalScore,
-            iq_score: getRow(row, 'iq_score') ? parseInt(getRow(row, 'iq_score'), 10) : null,
-            notes: getRow(row, 'notes') || null,
-            risk_level: getRow(row, 'risk_level') || 'low',
-            mchat_answers: {},
-            mchat_questions: [],
-            total_questions: 0,
-            pass_count: 0,
-            fail_count: 0,
-            screen_positive: false,
-          };
-          const dob = getRow(row, 'date_of_birth') || getRow(row, 'assessment_date');
-          if (dob) assessmentData.assessment_date = dob;
-
-          const { error } = await supabase.from('assessments').insert(assessmentData);
-          if (error) {
-            importErrors.push(`Assessment for patient_id "${hpId}": ${error.message}`);
-          } else {
-            importedAssessments += 1;
-          }
-        }
-      }
-
-      // 4. Import sessions
-      if (type === 'patients_sessions' || type === 'patients_full') {
-        for (const row of rows) {
-          const hpId = getRow(row, 'patient_id');
-          const patientId = patientIdMap.get(hpId);
-          if (!patientId) {
-            skippedRows += 1;
-            continue;
-          }
-          const sessionDate = getRow(row, 'session_date');
-          const sessionNotes = getRow(row, 'session_notes');
-          if (!sessionDate || !sessionNotes) {
-            skippedRows += 1;
-            continue;
-          }
-
-          const sessionData = {
-            patient_id: patientId,
-            session_date: sessionDate,
-            session_notes: sessionNotes,
-            duration: getRow(row, 'duration') ? parseInt(getRow(row, 'duration'), 10) : null,
-            session_status: getRow(row, 'session_status_type') || getRow(row, 'session_status') || null,
-          };
-          const { error } = await supabase.from('sessions').insert(sessionData);
-          if (error) {
-            importErrors.push(`Session for patient_id "${hpId}": ${error.message}`);
-          } else {
-            importedSessions += 1;
-          }
-        }
-      }
-
+      const importedPatients = result.data?.importedPatients ?? 0;
+      const importedAssessments = result.data?.importedAssessments ?? 0;
+      const importedSessions = result.data?.importedSessions ?? 0;
+      const skippedRows = result.data?.skippedRows ?? 0;
       const totalImported = importedPatients + importedAssessments + importedSessions;
+
       if (totalImported === 0) {
-        const firstError = importErrors[0];
-        toast.error(firstError ? `Import failed. ${firstError}` : 'Import failed. No records were inserted.');
+        toast.error('Import failed. No records were inserted.');
       } else {
         toast.success(
           `Import complete. Inserted ${importedPatients} patient(s), ${importedAssessments} assessment(s), ${importedSessions} session(s).` +
-          (skippedRows > 0 ? ` Skipped ${skippedRows} row(s).` : '')
+            (skippedRows > 0 ? ` Skipped ${skippedRows} row(s).` : '')
         );
-      }
-      if (importErrors.length > 0) {
-        console.error('CSV import errors:', importErrors);
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: unknown) {
@@ -763,450 +719,172 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
   const onDragOver = (e: React.DragEvent) => e.preventDefault();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center">
-              <Button variant="ghost" onClick={() => navigate('/admin/dashboard')} className="mr-4">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
-              </Button>
-              <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
-              <div>
-                <h1 className="text-2xl text-gray-900">Admin Settings</h1>
-                <p className="text-sm text-gray-600">System administration and management</p>
+    <>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <header className="bg-white shadow-sm border-b">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center py-4">
+              <div className="flex items-center">
+                <Button variant="ghost" onClick={() => navigate('/admin/dashboard')} className="mr-4">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Dashboard
+                </Button>
+                <img src={bloomSenseLogo} alt="BloomSense" className="h-8 w-8 mr-3" />
+                <div>
+                  <h1 className="text-2xl text-gray-900">Admin Settings</h1>
+                  <p className="text-sm text-gray-600">System administration and management</p>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* System Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Children</p>
-                  <p className="text-2xl font-bold">{systemStats.totalChildren}</p>
-                </div>
-                <Users className="h-8 w-8 text-blue-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Therapists</p>
-                  <p className="text-2xl font-bold">{systemStats.totalTherapists}</p>
-                </div>
-                <Shield className="h-8 w-8 text-green-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Caregivers</p>
-                  <p className="text-2xl font-bold">{systemStats.totalCaregivers}</p>
-                </div>
-                <Users className="h-8 w-8 text-purple-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Completed</p>
-                  <p className="text-2xl font-bold">{systemStats.completedScreenings}</p>
-                </div>
-                <FileText className="h-8 w-8 text-orange-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Pending</p>
-                  <p className="text-2xl font-bold">{systemStats.pendingAssessments}</p>
-                </div>
-                <BarChart className="h-8 w-8 text-red-600" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Admin Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="therapists">Therapist Accounts</TabsTrigger>
-            <TabsTrigger value="checklists">Assessment Tools</TabsTrigger>
-            <TabsTrigger value="data">Data Management</TabsTrigger>
-            <TabsTrigger value="system">Assign Doctor to Imported Patients</TabsTrigger>
-          </TabsList>
-
-          {/* Therapist Accounts Tab */}
-          <TabsContent value="therapists" className="space-y-6">
+        </header>
+  
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* System Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle>Therapist Accounts</CardTitle>
-                    <CardDescription>Manage therapist access and permissions</CardDescription>
+                    <p className="text-sm text-gray-600">Total Patients</p>
+                    <p className="text-2xl font-bold">{systemStats.totalChildren}</p>
                   </div>
-                  <Button onClick={handleAddTherapist}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Therapist
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {therapistAccounts.map((therapist) => (
-                    <div key={therapist.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="flex items-center space-x-4">
-                        <Avatar>
-                          <AvatarFallback>{therapist.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <h4 className="font-medium">{therapist.name}</h4>
-                          <p className="text-sm text-gray-600">{therapist.email}</p>
-                          <p className="text-sm text-gray-500">{therapist.role} • {therapist.patients} patients</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        <Badge variant={therapist.status === 'active' ? 'default' : 'secondary'}>
-                          {therapist.status}
-                        </Badge>
-                        <Button variant="ghost" size="sm">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Switch
-                          checked={therapist.status === 'active'}
-                          onCheckedChange={() => handleToggleStatus(therapist.id, therapist.status)}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                  <Users className="h-8 w-8 text-blue-600" />
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Assessment Tools Tab */}
-          <TabsContent value="checklists" className="space-y-6">
             <Card>
-              <CardHeader>
-                <CardTitle>Questionnaire Management</CardTitle>
-                <CardDescription>Add questionnaire names, then manage questions with score and critical-item flags</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <Input
-                      placeholder="New questionnaire name"
-                      value={newQuestionnaireName}
-                      onChange={(e) => setNewQuestionnaireName(e.target.value)}
-                    />
-                    <Input
-                      placeholder="Questionnaire details/description"
-                      value={newQuestionnaireDescription}
-                      onChange={(e) => setNewQuestionnaireDescription(e.target.value)}
-                    />
-                    <Button variant="outline" onClick={handleAddQuestionnaire}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Questionnaire
-                    </Button>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Therapists</p>
+                    <p className="text-2xl font-bold">{systemStats.totalTherapists}</p>
                   </div>
-
-                  {questionnaires.length > 0 && (
-                    <div className="space-y-2">
-                      <Label htmlFor="questionnaireSelect">Select Questionnaire</Label>
-                      <div className="flex gap-2">
-                        <select
-                          id="questionnaireSelect"
-                          className="w-full border rounded-md px-3 py-2 bg-white"
-                          value={selectedQuestionnaireId}
-                          onChange={(e) => setSelectedQuestionnaireId(e.target.value)}
-                        >
-                          {questionnaires.map((questionnaire) => (
-                            <option key={questionnaire.id} value={questionnaire.id}>
-                              {questionnaire.name}
-                            </option>
-                          ))}
-                        </select>
-                        {selectedQuestionnaire && (
-                          <Button
-                            variant="outline"
-                            type="button"
-                            onClick={() => handleDeleteQuestionnaire(selectedQuestionnaire.id)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-                    <div className="md:col-span-2">
-                      <Label htmlFor="newQuestion">Question</Label>
-                      <Input
-                        id="newQuestion"
-                        placeholder="Enter question text"
-                        value={newQuestionText}
-                        onChange={(e) => setNewQuestionText(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="questionScore">Score</Label>
-                      <Input
-                        id="questionScore"
-                        type="number"
-                        min="0"
-                        value={newQuestionScore}
-                        onChange={(e) => setNewQuestionScore(e.target.value)}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between border rounded-md px-3 py-2 h-10">
-                      <Label htmlFor="criticalItem" className="text-sm">Critical Item</Label>
-                      <Switch
-                        id="criticalItem"
-                        checked={newQuestionCritical}
-                        onCheckedChange={setNewQuestionCritical}
-                      />
-                    </div>
-                  </div>
-
-                  <Button variant="outline" className="w-full" onClick={handleAddQuestion}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Question
-                  </Button>
-
-                  {selectedQuestionnaire && (
-                    <div className="space-y-2">
-                      <h4 className="font-medium">{selectedQuestionnaire.name} Questions</h4>
-                      {selectedQuestionnaire.description && (
-                        <p className="text-sm text-gray-600">{selectedQuestionnaire.description}</p>
-                      )}
-                      {selectedQuestionnaire.questions.length === 0 ? (
-                        <p className="text-sm text-gray-500">No questions added yet.</p>
-                      ) : (
-                        selectedQuestionnaire.questions.map((question, index) => (
-                          <div key={question.id} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div className="flex-1">
-                              <p className="text-sm font-medium">Question {index + 1}</p>
-                              <p className="text-sm text-gray-700">{question.text}</p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                Score: {question.score} | Critical Item: {question.isCritical ? 'True' : 'False'}
-                              </p>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteQuestion(selectedQuestionnaire.id, question.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                  {!isLoadingQuestionnaires && questionnaires.length === 0 && (
-                    <p className="text-sm text-gray-500">No questionnaires found in Supabase. Add one to begin.</p>
-                  )}
+                  <Shield className="h-8 w-8 text-green-600" />
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Data Management Tab */}
-          <TabsContent value="data" className="space-y-6">
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Database className="h-5 w-5 mr-2" /> Data Export
-                </CardTitle>
-                <CardDescription>
-                  Export Patient data for data backups
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h4 className="font-medium">Data Export Options</h4>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="includePersonal">Include Personal Information</Label>
-                        <Switch 
-                          id="includePersonal" 
-                          checked={includePersonal}
-                          onCheckedChange={setIncludePersonal}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="includeScores">Include Assessment Scores</Label>
-                        <Switch 
-                          id="includeScores" 
-                          checked={includeScores}
-                          onCheckedChange={setIncludeScores}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="includeSession">Include Session History</Label>
-                        <Switch 
-                          id="includeSession" 
-                          checked={includeSession}
-                          onCheckedChange={setincludeSession}
-                        />
-                      </div>
-                    </div>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Questionaires</p>
+                    <p className="text-2xl font-bold">{systemStats.totalQuestionaires}</p>
                   </div>
-                  
-                  <div className="space-y-4">
-                    <h4 className="font-medium">Export Format</h4>
-                    <div className="space-y-2">
-                      <Button 
-                        variant="outline" 
-                        className="w-full justify-start" 
-                        onClick={handleExportCSV}
-                        disabled={isExporting || !includePersonal}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        {isExporting ? 'Exporting...' : 'Export as CSV'}
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        className="w-full justify-start" 
-                        onClick={handleExportJSON}
-                        disabled={isExporting || !includePersonal}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        {isExporting ? 'Exporting...' : 'Export as JSON'}
-                      </Button>
-                    </div>
-                  </div>
+                  <BarChart className="h-8 w-8 text-red-600" />
                 </div>
               </CardContent>
             </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Data Import</CardTitle>
-                <CardDescription>Import existing patient data : (Data must be in CSV format)
-                
-                  <ul className="list-disc list-outside ml-4 mt-2 space-y-1">
-                    
-                    <li><b>To Import Patient data, enter a valid CSV file with the following columns:</b>  patient_id, name, age, gender, caregiver_contact.<br/> Optional fields include: caregiver_name, date_of_birth, remarks, status(active/inactive) </li>
-                    <li><b>To Import Patient data along with Assessment scores, enter a valid CSV file with the following columns:</b> patient_id, total_score. <br/> Optional fields include iq_score, notes, risk_level(moderate/high/low)</li> 
-                    <li><b>To Import Patient data along with Session History, enter a valid CSV file with the following columns:</b> patient_id, session_date, session_notes. <br/> Optional fields include duration, session_status_type(scheduled/completed/cancelled)</li>
-                    <li><b>To Import Patient data along with Assessment & Session history, enter a valid CSV file with the following columns:</b> patient_id, name, age, gender, caregiver_contact, total_score, session_date, session_notes. <br/> Optional fields include as above of all files</li>
-                  </ul>
-
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="mb-6 space-y-2 text-left">
-                  <p className="font-medium text-sm text-gray-800">Select CSV Information Option: </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                    <label className="flex items-start space-x-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="importType"
-                        value="patients"
-                        className="mt-1"
-                        checked={importType === 'patients'}
-                        onChange={() => setImportType('patients')}
-                      />
-                      <span>
-                        <span className="font-semibold block">Patient data only</span>
-                      </span>
-                    </label>
-                    <label className="flex items-start space-x-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="importType"
-                        value="patients_assessments"
-                        className="mt-1"
-                        checked={importType === 'patients_assessments'}
-                        onChange={() => setImportType('patients_assessments')}
-                      />
-                      <span>
-                        <span className="font-semibold block">Patients + Assessment scores</span>
-                      </span>
-                    </label>
-                    <label className="flex items-start space-x-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="importType"
-                        value="patients_sessions"
-                        className="mt-1"
-                        checked={importType === 'patients_sessions'}
-                        onChange={() => setImportType('patients_sessions')}
-                      />
-                      <span>
-                        <span className="font-semibold block">Patients + Session history</span>
-                      </span>
-                    </label>
-                    <label className="flex items-start space-x-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="importType"
-                        value="patients_full"
-                        className="mt-1"
-                        checked={importType === 'patients_full'}
-                        onChange={() => setImportType('patients_full')}
-                      />
-                      <span>
-                        <span className="font-semibold block">Patients + Assessments + Sessions</span>
-                      </span>
-                    </label>
-                  </div>
-                </div>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv"
-                  className="hidden"
-                  onChange={onFileChange}
-                />
-                <div
-                  className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 hover:bg-gray-50/50 transition-colors cursor-pointer"
-                  onDrop={onDrop}
-                  onDragOver={onDragOver}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  {isImporting ? (
-                    <>
-                      <Loader2 className="h-12 w-12 text-blue-500 mx-auto mb-4 animate-spin" />
-                      <p className="text-gray-600">Importing...</p>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-600 mb-4">Drag and drop a CSV file here, or click to browse</p>
-                      <Button variant="outline" type="button" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
-                        <Upload className="h-4 w-4 mr-2" />
-                        Choose CSV File
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>             
-        </Tabs>
+          </div>
+  
+          {/* Admin Tabs */}
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="therapists">Therapist Accounts</TabsTrigger>
+              <TabsTrigger value="checklists">Assessment Tools</TabsTrigger>
+              <TabsTrigger value="data">Data Management</TabsTrigger>
+              <TabsTrigger value="system">Assign/Reassign Doctor to Patients</TabsTrigger>
+            </TabsList>
+  
+            <TabsContent value="therapists" className="space-y-6">
+            <TherapistAcccountsTab
+              therapistAccounts={therapistAccounts}
+              onAddTherapist={handleAddTherapist}
+              onToggleStatus={handleToggleStatus}
+              onLoadTherapistDetails={fetchTherapistById}
+              onSaveTherapistDetails={handleSaveTherapistDetails}
+            />
+            </TabsContent>
+  
+            <TabsContent value="checklists" className="space-y-6">
+              <AssessmentToolsTab
+                questionnaires={questionnaires}
+                selectedQuestionnaireId={selectedQuestionnaireId}
+                newQuestionnaireName={newQuestionnaireName}
+                newQuestionnaireDescription={newQuestionnaireDescription}
+                newQuestionText={newQuestionText}
+                newQuestionScore={newQuestionScore}
+                newQuestionCritical={newQuestionCritical}
+                isLoadingQuestionnaires={isLoadingQuestionnaires}
+                onSelectedQuestionnaireChange={setSelectedQuestionnaireId}
+                onNewQuestionnaireNameChange={setNewQuestionnaireName}
+                onNewQuestionnaireDescriptionChange={setNewQuestionnaireDescription}
+                onNewQuestionTextChange={setNewQuestionText}
+                onNewQuestionScoreChange={setNewQuestionScore}
+                onNewQuestionCriticalChange={setNewQuestionCritical}
+                onAddQuestionnaire={handleAddQuestionnaire}
+                onDeleteQuestionnaire={handleDeleteQuestionnaire}
+                onAddQuestion={handleAddQuestion}
+                onDeleteQuestion={handleDeleteQuestion}
+              />
+            </TabsContent>
+  
+            <TabsContent value="data" className="space-y-6">
+              <DataManagementTab
+                includePersonal={includePersonal}
+                includeScores={includeScores}
+                includeSession={includeSession}
+                isExporting={isExporting}
+                importType={importType}
+                isImporting={isImporting}
+                fileInputRef={fileInputRef}
+                onIncludePersonalChange={setIncludePersonal}
+                onIncludeScoresChange={setIncludeScores}
+                onIncludeSessionChange={setincludeSession}
+                onExportCSV={handleExportCSV}
+                onExportJSON={handleExportJSON}
+                onImportTypeChange={setImportType}
+                onFileChange={onFileChange}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+              />
+            </TabsContent>
+  
+            <TabsContent value="system" className="space-y-6">
+              <SystemSettingsTab />
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
-    </div>
+  
+      {/* Confirm Delete Modal - outside root div so fixed positioning works correctly */}
+      {confirmOpen && (
+        <div
+          className="fixed inset-0 n flex items-center justify-center bg-black/45 backdrop-blur-sm p-4"
+          onClick={() => {
+            if (!isDeletingItem) setConfirmOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Confirm deletion</h3>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              This will permanently delete "{confirmTargetLabel}". This action cannot be undone.
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmOpen(false)}
+                disabled={isDeletingItem}
+                className="min-w-24"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={onConfirmDelete}
+                disabled={isDeletingItem}
+                className="min-w-24"
+              >
+                {isDeletingItem ? 'Deleting...' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
-}
+  }
