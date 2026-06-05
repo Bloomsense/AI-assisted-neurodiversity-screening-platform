@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import type { EventFlowState } from '../utils/supabase/timelineEvents';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Progress } from './ui/progress';
@@ -28,8 +29,10 @@ interface MChatQuestion {
 
 export default function ScreeningWorkflow() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { childId } = useParams();
   const [searchParams] = useSearchParams();
+  const flowState = (location.state as EventFlowState | null) ?? {};
   const questionnaireType = searchParams.get('type') || 'mchat';
   const [currentStage, setCurrentStage] = useState<ScreeningStage>(1);
   const [mchatAnswers, setMchatAnswers] = useState<Record<string, string>>({});
@@ -159,6 +162,7 @@ export default function ScreeningWorkflow() {
         behaviorNotes,
         childId,
         questionnaireType,
+        timelineEventId: flowState.timelineEventId,
       },
     });
   };

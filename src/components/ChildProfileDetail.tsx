@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -34,6 +34,100 @@ import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { supabase } from '../utils/supabase/client';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
+type PatientRow = {
+  patient_id: string;
+  name: string;
+  age: number;
+  date_of_birth: string | null;
+  gender: string | null;
+  caregiver_name: string;
+  caregiver_contact: string | null;
+  remarks: string | null;
+  status: string | null;
+  profile_created_date: string | null;
+  profile_tag: string | null;
+  risk_level: string | null;
+  assigned_doctor_id: string | null;
+};
+
+function parseCaregiverContact(contact: string | null) {
+  if (!contact) return { phone: '', email: '' };
+  if (contact.includes(' | ')) {
+    const [phone, email] = contact.split(' | ', 2);
+    return { phone: phone.trim(), email: email.trim() };
+  }
+  if (contact.includes('@')) return { phone: '', email: contact.trim() };
+  return { phone: contact.trim(), email: '' };
+}
+
+type AssessmentHistoryItem = {
+  id: string;
+  date: string;
+  questionnaireLabel: string;
+  totalScore: number | null;
+  riskLevel: string | null;
+  notes: string | null;
+  doctorId: string | null;
+};
+
+type SessionHistoryItem = {
+  id: string;
+  date: string;
+  title: string;
+  notes: string;
+  duration: number | null;
+  status: string | null;
+  doctorId: string | null;
+};
+
+function normalizeRiskKey(risk: string | null): string {
+  if (!risk) return 'unknown';
+  const r = risk.toLowerCase();
+  if (r.includes('high')) return 'high';
+  if (r.includes('low')) return 'low';
+  if (r.includes('moderate') || r.includes('medium')) return 'moderate';
+  return 'unknown';
+}
+
+function questionnaireLabelFromRow(
+  questionnaireId: string | null,
+  labels: Record<string, string>,
+): string {
+  if (!questionnaireId) return 'Assessment';
+  return labels[questionnaireId] || 'Assessment';
+}
+
+function parseSessionNotes(raw: string): { title: string; body: string } {
+  const match = raw.match(/^Title:\s*(.+?)\n\n([\s\S]*)$/);
+  if (match) return { title: match[1].trim(), body: match[2].trim() };
+  return { title: 'Therapy Session', body: raw.trim() };
+}
+
+async function fetchQuestionnaireLabels(ids: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from('questionnaires')
+    .select('id, name, code')
+    .in('id', unique);
+
+  if (error) {
+    console.error('fetchQuestionnaireLabels:', error);
+    return {};
+  }
+
+  const map: Record<string, string> = {};
+  for (const q of data || []) {
+    const id = String(q.id);
+    const code = String(q.code || '').toLowerCase();
+    if (code === 'neurodiversity') map[id] = 'Neurodiversity Core';
+    else if (code === 'mchat') map[id] = 'M-CHAT-R/F';
+    else map[id] = String(q.name || 'Assessment');
+  }
+  return map;
+}
+
 export default function ChildProfileDetail() {
   const navigate = useNavigate();
   const { childId } = useParams();
@@ -57,16 +151,14 @@ export default function ChildProfileDetail() {
   const [isEditingTag, setIsEditingTag] = useState(false);
   const [tempTag, setTempTag] = useState('');
 
-  // Latest screening summary
-  const [latestAssessment, setLatestAssessment] = useState<{
-    risk_level: string;
-    screen_positive: boolean;
-    total_questions: number;
-    pass_count: number;
-    fail_count: number;
-    questionnaire_type: string | null;
-    created_at: string;
-  } | null>(null);
+  const [patient, setPatient] = useState<PatientRow | null>(null);
+  const [loadingPatient, setLoadingPatient] = useState(true);
+
+  const [latestAssessment, setLatestAssessment] = useState<AssessmentHistoryItem | null>(null);
+  const [assessmentHistory, setAssessmentHistory] = useState<AssessmentHistoryItem[]>([]);
+  const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
+  const [loadingAssessments, setLoadingAssessments] = useState(true);
+  const [loadingSessions, setLoadingSessions] = useState(true);
 
   // Use local backend in development, cloud backend in production
   const API_BASE_URL = import.meta.env.DEV 
@@ -78,7 +170,8 @@ export default function ChildProfileDetail() {
     if (childId) {
       loadComments();
       loadMeetings();
-      loadLatestAssessment();
+      loadAssessmentHistory();
+      loadSessionHistory();
     }
   }, [childId]);
 
@@ -122,92 +215,208 @@ export default function ChildProfileDetail() {
     }
   };
 
-  const loadLatestAssessment = async () => {
+  const loadAssessmentHistory = async () => {
+    if (!childId) return;
     try {
+      setLoadingAssessments(true);
       const { data, error } = await supabase
         .from('assessments')
-        .select('risk_level, screen_positive, total_questions, pass_count, fail_count, questionnaire_type, created_at')
+        .select(
+          'assessment_id, total_score, assessment_date, notes, risk_level, questionnaire_type, completed_by_doctor_id, created_at',
+        )
         .eq('patient_id', childId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('assessment_date', { ascending: false });
 
       if (error) {
-        console.error('Error loading latest assessment:', error);
+        console.error('Error loading assessments:', error);
+        toast.error('Failed to load assessment history');
+        setAssessmentHistory([]);
+        setLatestAssessment(null);
         return;
       }
 
-      if (data) {
-        setLatestAssessment(data);
-      }
+      const rows = data || [];
+      const labels = await fetchQuestionnaireLabels(
+        rows.map((r) => r.questionnaire_type as string | null).filter(Boolean) as string[],
+      );
+
+      const mapped: AssessmentHistoryItem[] = rows.map((row) => ({
+        id: String(row.assessment_id),
+        date: String(row.assessment_date || row.created_at),
+        questionnaireLabel: questionnaireLabelFromRow(
+          row.questionnaire_type as string | null,
+          labels,
+        ),
+        totalScore: row.total_score != null ? Number(row.total_score) : null,
+        riskLevel: row.risk_level as string | null,
+        notes: row.notes as string | null,
+        doctorId: row.completed_by_doctor_id as string | null,
+      }));
+
+      setAssessmentHistory(mapped);
+      setLatestAssessment(mapped[0] ?? null);
     } catch (error) {
-      console.error('Error loading latest assessment:', error);
+      console.error('Error loading assessments:', error);
+      setAssessmentHistory([]);
+      setLatestAssessment(null);
+    } finally {
+      setLoadingAssessments(false);
     }
   };
 
-  // Mock child data
-  const childData = {
-    id: childId || '1',
-    name: 'Ahmad Khan',
-    age: 4,
-    gender: 'Male',
-    caregiverName: 'Fatima Khan',
-    caregiverPhone: '+92 300 1234567',
-    createdDate: '2024-01-15',
-    lastAssessment: '2024-01-20'
+  const loadSessionHistory = async () => {
+    if (!childId) return;
+    try {
+      setLoadingSessions(true);
+      const { data, error } = await supabase
+        .from('sessions')
+        .select('session_id, session_date, session_notes, duration, session_status, doctor_id, created_at')
+        .eq('patient_id', childId)
+        .order('session_date', { ascending: false });
+
+      if (error) {
+        console.error('Error loading sessions:', error);
+        toast.error('Failed to load session history');
+        setSessionHistory([]);
+        return;
+      }
+
+      const mapped: SessionHistoryItem[] = (data || []).map((row) => {
+        const parsed = parseSessionNotes(String(row.session_notes || ''));
+        return {
+          id: String(row.session_id),
+          date: String(row.session_date || row.created_at),
+          title: parsed.title,
+          notes: parsed.body,
+          duration: row.duration != null ? Number(row.duration) : null,
+          status: row.session_status as string | null,
+          doctorId: row.doctor_id as string | null,
+        };
+      });
+
+      setSessionHistory(mapped);
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+      setSessionHistory([]);
+    } finally {
+      setLoadingSessions(false);
+    }
   };
 
-  const assessmentHistory = [
-    {
-      id: 1,
-      date: '2024-01-20',
-      type: 'Complete Screening',
-      mchatScore: '6/8 Red Flags',
-      adosScore: '12',
-      iqScore: '85',
-      status: 'completed',
-      risk: 'moderate'
-    },
-    {
-      id: 2,
-      date: '2024-01-15',
-      type: 'Initial Assessment',
-      mchatScore: '4/8 Red Flags',
-      status: 'completed',
-      risk: 'low'
-    }
-  ];
+  const combinedTimeline = useMemo(() => {
+    const entries: {
+      id: string;
+      date: string;
+      type: string;
+      description: string;
+      status: string;
+    }[] = [];
 
-  const sessionTimeline = [
+    for (const a of assessmentHistory) {
+      entries.push({
+        id: `assessment-${a.id}`,
+        date: a.date,
+        type: a.questionnaireLabel,
+        description:
+          a.notes ||
+          `Risk: ${a.riskLevel || 'N/A'}${a.totalScore != null ? ` · Score: ${a.totalScore}` : ''}`,
+        status: 'completed',
+      });
+    }
+
+    for (const s of sessionHistory) {
+      entries.push({
+        id: `session-${s.id}`,
+        date: s.date,
+        type: s.title,
+        description: s.notes,
+        status: s.status === 'completed' ? 'completed' : 'update',
+      });
+    }
+
+    if (patient?.profile_created_date) {
+      entries.push({
+        id: 'profile-created',
+        date: patient.profile_created_date,
+        type: 'Profile Created',
+        description: 'Initial child profile created',
+        status: 'created',
+      });
+    }
+
+    return entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [assessmentHistory, sessionHistory, patient]);
+
+  const contact = parseCaregiverContact(patient?.caregiver_contact ?? null);
+  const childData = patient
+    ? {
+        id: patient.patient_id || childId || '',
+        name: patient.name,
+        age: patient.age,
+        gender: patient.gender || 'Not specified',
+        caregiverName: patient.caregiver_name,
+        caregiverPhone: contact.phone || contact.email || '—',
+        caregiverEmail: contact.email,
+        remarks: patient.remarks,
+        status: patient.status,
+        riskLevel: patient.risk_level,
+        createdDate: patient.profile_created_date || new Date().toISOString(),
+        lastAssessment: latestAssessment?.date ?? null,
+      }
+    : null;
+
+  const recommendations = [
     {
       id: 1,
-      date: '2024-01-20',
-      type: 'Assessment Complete',
-      description: 'Full screening workflow completed including M-CHAT, behavior analysis, and ADOS testing',
-      status: 'completed'
+      category: 'Immediate Actions',
+      priority: 'high',
+      items: [
+        'Schedule follow-up assessment in 3 months',
+        'Refer to speech therapist for communication evaluation',
+        'Begin social skills group therapy'
+      ]
     },
     {
       id: 2,
-      date: '2024-01-18',
-      type: 'Caregiver Update',
-      description: 'Parent reported improved eye contact during meal times',
-      status: 'update'
+      category: 'Home-based Interventions',
+      priority: 'medium',
+      items: [
+        'Implement visual schedules for daily routines',
+        'Practice joint attention activities during play',
+        'Use simple, concrete language during interactions'
+      ]
     },
     {
       id: 3,
-      date: '2024-01-15',
-      type: 'Profile Created',
-      description: 'Initial child profile created with basic information',
-      status: 'created'
+      category: 'Long-term Goals',
+      priority: 'low',
+      items: [
+        'Develop peer interaction skills',
+        'Improve functional communication',
+        'Increase independent daily living skills'
+      ]
     }
   ];
 
-  const getRiskBadge = (risk: string) => {
-    switch (risk) {
-      case 'high': return <Badge variant="destructive">High Risk</Badge>;
-      case 'moderate': return <Badge className="bg-orange-100 text-orange-800">Moderate Risk</Badge>;
-      case 'low': return <Badge className="bg-green-100 text-green-800">Low Risk</Badge>;
-      default: return <Badge variant="secondary">Unknown</Badge>;
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return 'text-red-600 bg-red-50';
+      case 'medium': return 'text-orange-600 bg-orange-50';
+      case 'low': return 'text-blue-600 bg-blue-50';
+      default: return 'text-gray-600 bg-gray-50';
+    }
+  };
+
+  const getRiskBadge = (risk: string | null) => {
+    switch (normalizeRiskKey(risk)) {
+      case 'high':
+        return <Badge variant="destructive">{risk || 'High Risk'}</Badge>;
+      case 'moderate':
+        return <Badge className="bg-orange-100 text-orange-800">{risk || 'Moderate Risk'}</Badge>;
+      case 'low':
+        return <Badge className="bg-green-100 text-green-800">{risk || 'Low Risk'}</Badge>;
+      default:
+        return <Badge variant="secondary">{risk || 'Unknown'}</Badge>;
     }
   };
 
@@ -446,26 +655,22 @@ export default function ChildProfileDetail() {
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <p className="text-gray-600">Questionnaire</p>
-                  <p className="font-medium">
-                    {latestAssessment.questionnaire_type === 'neurodiversity'
-                      ? 'Neurodiversity Core'
-                      : 'M-CHAT-R/F'}
-                  </p>
+                  <p className="font-medium">{latestAssessment.questionnaireLabel}</p>
                 </div>
                 <div>
                   <p className="text-gray-600">Risk Level</p>
-                  <p className="font-medium">{latestAssessment.risk_level}</p>
+                  <p className="font-medium">{latestAssessment.riskLevel || '—'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-600">Score</p>
+                  <p className="text-gray-600">Total Score</p>
                   <p className="font-medium">
-                    {latestAssessment.pass_count} passed / {latestAssessment.fail_count} failed
+                    {latestAssessment.totalScore != null ? latestAssessment.totalScore : '—'}
                   </p>
                 </div>
                 <div>
                   <p className="text-gray-600">Date</p>
                   <p className="font-medium">
-                    {new Date(latestAssessment.created_at).toLocaleDateString()}
+                    {new Date(latestAssessment.date).toLocaleDateString()}
                   </p>
                 </div>
               </div>
@@ -494,31 +699,44 @@ export default function ChildProfileDetail() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {assessmentHistory.map((assessment) => (
-                      <div key={assessment.id} className="border rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="font-medium">{assessment.type}</h4>
-                          {getRiskBadge(assessment.risk)}
+                  {loadingAssessments ? (
+                    <div className="py-8 text-center text-gray-500">
+                      <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                      Loading assessments...
+                    </div>
+                  ) : assessmentHistory.length === 0 ? (
+                    <p className="text-sm text-gray-500 py-4">No assessments recorded yet.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {assessmentHistory.map((assessment) => (
+                        <div key={assessment.id} className="border rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-medium">{assessment.questionnaireLabel}</h4>
+                            {getRiskBadge(assessment.riskLevel)}
+                          </div>
+                          <p className="text-sm text-gray-600 mb-2">
+                            <Calendar className="h-4 w-4 inline mr-1" />
+                            {new Date(assessment.date).toLocaleDateString()}
+                          </p>
+                          <div className="space-y-1 text-sm">
+                            {assessment.totalScore != null && (
+                              <p>
+                                <span className="font-medium">Total score:</span> {assessment.totalScore}
+                              </p>
+                            )}
+                            {assessment.doctorId && (
+                              <p>
+                                <span className="font-medium">Completed by:</span> {assessment.doctorId}
+                              </p>
+                            )}
+                            {assessment.notes && (
+                              <p className="text-gray-700 whitespace-pre-wrap mt-2">{assessment.notes}</p>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-sm text-gray-600 mb-2">
-                          <Calendar className="h-4 w-4 inline mr-1" />
-                          {new Date(assessment.date).toLocaleDateString()}
-                        </p>
-                        <div className="space-y-1 text-sm">
-                          {assessment.mchatScore && (
-                            <p><span className="font-medium">M-CHAT:</span> {assessment.mchatScore}</p>
-                          )}
-                          {assessment.adosScore && (
-                            <p><span className="font-medium">ADOS:</span> {assessment.adosScore}</p>
-                          )}
-                          {assessment.iqScore && (
-                            <p><span className="font-medium">IQ:</span> {assessment.iqScore}</p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -531,65 +749,50 @@ export default function ChildProfileDetail() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {/* Mock session data - in real app, this would come from Supabase */}
-                    {[
-                      {
-                        id: 1,
-                        title: 'Social Skills Development',
-                        date: '2024-01-22',
-                        notes: 'Child showed good progress in maintaining eye contact during structured activities. Responded positively to social games.'
-                      },
-                      {
-                        id: 2,
-                        title: 'Behavioral Assessment',
-                        date: '2024-01-18',
-                        notes: 'Observed repetitive behaviors during free play. Recommend sensory integration activities for future sessions.'
-                      }
-                    ].map((session) => (
-                      <div key={session.id} className="border rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="font-medium">{session.title}</h4>
-                          <Badge variant="outline" className="text-xs">Session</Badge>
+                  {loadingSessions ? (
+                    <div className="py-8 text-center text-gray-500">
+                      <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                      Loading sessions...
+                    </div>
+                  ) : sessionHistory.length === 0 ? (
+                    <p className="text-sm text-gray-500 py-4">No therapy sessions recorded yet.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {sessionHistory.map((session) => (
+                        <div key={session.id} className="border rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-medium">{session.title}</h4>
+                            <Badge variant="outline" className="text-xs capitalize">
+                              {session.status || 'session'}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-gray-600 mb-2">
+                            <Calendar className="h-4 w-4 inline mr-1" />
+                            {new Date(session.date).toLocaleDateString()}
+                            {session.duration != null && (
+                              <span className="ml-2">· {session.duration} min</span>
+                            )}
+                          </p>
+                          {session.doctorId && (
+                            <p className="text-sm text-gray-600 mb-2">
+                              <span className="font-medium">Therapist ID:</span> {session.doctorId}
+                            </p>
+                          )}
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap">{session.notes}</p>
                         </div>
-                        <p className="text-sm text-gray-600 mb-2">
-                          <Calendar className="h-4 w-4 inline mr-1" />
-                          {new Date(session.date).toLocaleDateString()}
-                        </p>
-                        <p className="text-sm text-gray-700">{session.notes}</p>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
               {/* Summary Statistics */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Assessment Summary</CardTitle>
+                  <CardTitle>Profile Information</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-6">
                     <div>
-                      <h4 className="font-medium mb-2">Latest Screening Results</h4>
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">M-CHAT Risk Factors</span>
-                          <span className="text-sm font-medium">6/8</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">ADOS Score</span>
-                          <span className="text-sm font-medium">12</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">IQ Assessment</span>
-                          <span className="text-sm font-medium">85</span>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h4 className="font-medium mb-2">Profile Information</h4>
                       <div className="space-y-2">
                         <div className="flex justify-between">
                           <span className="text-sm text-gray-600">Profile Created</span>
@@ -605,10 +808,14 @@ export default function ChildProfileDetail() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-sm text-gray-600">Total Sessions</span>
-                          <span className="text-sm font-medium">3</span>
+                          <span className="text-sm font-medium">{sessionHistory.length}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Total Assessments</span>
+                          <span className="text-sm font-medium">{assessmentHistory.length}</span>
                         </div>
                       </div>
-                    </div>
+                    
                   </div>
                 </CardContent>
               </Card>
@@ -622,27 +829,36 @@ export default function ChildProfileDetail() {
                 <CardTitle>Session Timeline</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-6">
-                  {sessionTimeline.map((session, index) => (
-                    <div key={session.id} className="flex items-start space-x-4">
-                      <div className="flex flex-col items-center">
-                        {getStatusIcon(session.status)}
-                        {index < sessionTimeline.length - 1 && (
-                          <div className="w-px h-16 bg-gray-200 mt-2"></div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-medium text-gray-900">{session.type}</h4>
-                          <span className="text-sm text-gray-500">
-                            {new Date(session.date).toLocaleDateString()}
-                          </span>
+                {loadingAssessments || loadingSessions ? (
+                  <div className="py-8 text-center text-gray-500">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                    Loading timeline...
+                  </div>
+                ) : combinedTimeline.length === 0 ? (
+                  <p className="text-sm text-gray-500 py-4">No events recorded yet.</p>
+                ) : (
+                  <div className="space-y-6">
+                    {combinedTimeline.map((entry, index) => (
+                      <div key={entry.id} className="flex items-start space-x-4">
+                        <div className="flex flex-col items-center">
+                          {getStatusIcon(entry.status)}
+                          {index < combinedTimeline.length - 1 && (
+                            <div className="w-px h-16 bg-gray-200 mt-2"></div>
+                          )}
                         </div>
-                        <p className="text-sm text-gray-600 mt-1">{session.description}</p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-medium text-gray-900">{entry.type}</h4>
+                            <span className="text-sm text-gray-500">
+                              {new Date(entry.date).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">{entry.description}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
