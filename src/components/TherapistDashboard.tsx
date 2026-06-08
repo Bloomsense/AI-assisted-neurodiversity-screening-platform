@@ -23,11 +23,13 @@ import {
 import bloomSenseLogo from "figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png";
 import { toast } from "sonner";
 import { supabase } from "../utils/supabase/client";
+import { resolveLoggedInDoctorId } from "../utils/supabase/doctorProfile";
 
 export default function TherapistDashboard() {
   const navigate = useNavigate();
   const [therapistDisplayName, setTherapistDisplayName] = useState<string>("Dr");
   const [therapistUserId, setTherapistUserId] = useState<string | null>(null);
+  const [doctorEmployeeId, setDoctorEmployeeId] = useState<string | null>(null);
   const [overviewStats, setOverviewStats] = useState([
     {
       title: "Active Child Profiles",
@@ -46,17 +48,21 @@ export default function TherapistDashboard() {
     Array<{ id: number; type: string; child: string; message: string; time: string; patientId?: string }>
   >([]);
   const [recentChildren, setRecentChildren] = useState<
-    Array<{ id: string; name: string; age: number; lastSession: string; status: string }>
+    Array<{ id: string; name: string; age: number; createdDate: string; status: string }>
   >([]);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    const loadTherapist = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const fullName = (user.user_metadata?.fullName as string) || user.email?.split("@")[0] || "";
       const firstName = fullName.trim().split(/\s+/)[0] || "Therapist";
       setTherapistDisplayName(firstName ? `Dr. ${firstName}` : "Dr");
       setTherapistUserId(user.id);
-    });
+      const employeeId = await resolveLoggedInDoctorId();
+      setDoctorEmployeeId(employeeId);
+    };
+    loadTherapist();
   }, []);
 
   useEffect(() => {
@@ -64,13 +70,16 @@ export default function TherapistDashboard() {
       if (!therapistUserId) return;
 
       const nowIso = new Date().toISOString();
+      const patientDoctorFilter = doctorEmployeeId ?? undefined;
 
       const [patientsResult, pendingSessionsResult, upcomingAppointmentsResult, recentChildrenResult] =
         await Promise.all([
-        supabase
-          .from("patients")
-          .select("id", { count: "exact", head: true })
-          .eq("assigned_doctor_id", therapistUserId),
+        patientDoctorFilter
+          ? supabase
+              .from("patients")
+              .select("patient_id", { count: "exact", head: true })
+              .eq("assigned_doctor_id", patientDoctorFilter)
+          : Promise.resolve({ count: 0, error: null, data: null }),
         supabase
           .from("appointments")
           .select("id", { count: "exact", head: true })
@@ -85,12 +94,14 @@ export default function TherapistDashboard() {
           .gte("appointment_date", nowIso)
           .order("appointment_date", { ascending: true })
           .limit(5),
-        supabase
-          .from("patients")
-          .select("id,name,age,updated_at,status")
-          .eq("assigned_doctor_id", therapistUserId)
-          .order("updated_at", { ascending: false })
-          .limit(5),
+        patientDoctorFilter
+          ? supabase
+              .from("patients")
+              .select("patient_id, name, age, profile_created_date, status, profile_tag")
+              .eq("assigned_doctor_id", patientDoctorFilter)
+              .order("profile_created_date", { ascending: false })
+              .limit(5)
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
       if (patientsResult.error) {
@@ -135,18 +146,20 @@ export default function TherapistDashboard() {
       });
       setRecentNotifications(notifications);
 
-      const mappedChildren = (recentChildrenResult.data || []).map((child: any) => ({
-        id: String(child.id),
-        name: child.name || "Unknown",
-        age: Number(child.age) || 0,
-        lastSession: child.updated_at ? new Date(child.updated_at).toLocaleDateString() : "N/A",
-        status: child.status || "In Progress",
+      const mappedChildren = (recentChildrenResult.data || []).map((child: Record<string, unknown>) => ({
+        id: String(child.patient_id),
+        name: String(child.name ?? "Unknown"),
+        age: typeof child.age === "number" ? child.age : Number(child.age) || 0,
+        createdDate: child.profile_created_date
+          ? new Date(String(child.profile_created_date)).toLocaleDateString()
+          : "N/A",
+        status: String(child.profile_tag || child.status || "active"),
       }));
       setRecentChildren(mappedChildren);
     };
 
     fetchDashboardStats();
-  }, [therapistUserId]);
+  }, [therapistUserId, doctorEmployeeId]);
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
@@ -358,7 +371,7 @@ export default function TherapistDashboard() {
                         <div>
                           <p className="font-medium">{child.name}</p>
                           <p className="text-sm text-gray-500">
-                            Age {child.age} • Last session: {child.lastSession}
+                            Age {child.age} • Created: {child.createdDate}
                           </p>
                         </div>
                       </div>

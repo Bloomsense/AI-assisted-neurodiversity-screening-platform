@@ -13,6 +13,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
+import { toast } from 'sonner';
 import { supabase } from '../utils/supabase/client';
 import { resolveLoggedInDoctorId } from '../utils/supabase/doctorProfile';
 import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
@@ -22,7 +23,7 @@ type Child = {
   id: string;
   name: string;
   age: number;
-  lastSession: string;
+  createdDate: string;
   status: string;
 };
 
@@ -32,36 +33,46 @@ export default function EventSelection() {
   const [selectedChild, setSelectedChild] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [allChildren, setAllChildren] = useState<Child[]>([]);
+  const [loadingChildren, setLoadingChildren] = useState(true);
+  const [starting, setStarting] = useState(false);
 
   useEffect(() => {
     const fetchChildren = async () => {
+      setLoadingChildren(true);
+
+      const doctorEmployeeId = await resolveLoggedInDoctorId();
+      if (!doctorEmployeeId) {
+        console.error('EventSelection: no employee_id for logged-in therapist');
+        setAllChildren([]);
+        setLoadingChildren(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('patients')
-        .select('id,name,age,status,last_session_date,updated_at')
-        .order('updated_at', { ascending: false });
+        .select(PATIENT_SELECT_COLUMNS)
+        .eq('assigned_doctor_id', doctorEmployeeId)
+        .order('profile_created_date', { ascending: false });
 
       if (error) {
         console.error('Error loading children for event selection:', error);
         setAllChildren([]);
+        setLoadingChildren(false);
         return;
       }
 
-      const mappedChildren: Child[] = (data || []).map((child: any) => {
-        const sessionDate = child.last_session_date ? new Date(child.last_session_date) : null;
-        const lastSession = sessionDate && !isNaN(sessionDate.getTime())
-          ? sessionDate.toLocaleDateString()
-          : 'No sessions yet';
-
-        return {
-          id: String(child.id),
-          name: child.name || 'Unknown',
-          age: Number(child.age) || 0,
-          lastSession,
-          status: child.status || 'In Progress',
-        };
-      });
+      const mappedChildren: Child[] = (data || []).map((child: Record<string, unknown>) => ({
+        id: String(child.patient_id),
+        name: String(child.name ?? 'Unknown'),
+        age: typeof child.age === 'number' ? child.age : Number(child.age) || 0,
+        createdDate: child.profile_created_date
+          ? new Date(String(child.profile_created_date)).toLocaleDateString()
+          : 'N/A',
+        status: String(child.profile_tag || child.status || 'active'),
+      }));
 
       setAllChildren(mappedChildren);
+      setLoadingChildren(false);
     };
 
     fetchChildren();
@@ -231,9 +242,13 @@ export default function EventSelection() {
 
             {/* Children List */}
             <div className="space-y-2 max-h-96 overflow-y-auto">
-              {filteredChildren.length === 0 ? (
+              {loadingChildren ? (
+                <div className="text-center py-8 text-gray-500">Loading child profiles...</div>
+              ) : filteredChildren.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
-                  No children found matching "{searchQuery}"
+                  {searchQuery
+                    ? `No children found matching "${searchQuery}"`
+                    : 'No child profiles assigned to you yet.'}
                 </div>
               ) : (
                 filteredChildren.map((child) => (
@@ -252,7 +267,7 @@ export default function EventSelection() {
                       </Avatar>
                       <div className="text-left">
                         <p className="font-medium">{child.name}</p>
-                        <p className="text-sm text-gray-500">Age {child.age} • Last session: {child.lastSession}</p>
+                        <p className="text-sm text-gray-500">Age {child.age} • Created: {child.createdDate}</p>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -283,10 +298,10 @@ export default function EventSelection() {
           </Button>
           <Button
             onClick={handleStartEvent}
-            disabled={!isFormValid}
+            disabled={!isFormValid || starting}
             className="bg-teal-600 hover:bg-teal-700"
           >
-            Start Event
+            {starting ? 'Starting...' : 'Start Event'}
           </Button>
         </div>
       </div>
