@@ -86,7 +86,6 @@ export default function EventSelection() {
   const handleStartEvent = async () => {
     if (!selectedEventType || !selectedChild) return;
 
-    const child = allChildren.find((c) => c.id === selectedChild);
     setStarting(true);
 
     try {
@@ -130,7 +129,6 @@ export default function EventSelection() {
       } else {
         navigate(`/therapist/session/${selectedChild}`, { state: flowState });
       }
-      return;
     } catch (e) {
       console.error(e);
       toast.warning('Could not write timeline event');

@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Download, FileText, Home, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Download, Home, Loader2 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { saveAssessmentAndLinkTimeline } from '../utils/supabase/timelineEvents';
@@ -216,6 +216,14 @@ ${isMchat ? 'Â© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/Fâ„
     toast.success('Report downloaded successfully');
   };
 
+  const handleFinishAssessment = () => {
+    if (!childId) {
+      navigate('/therapist/dashboard');
+      return;
+    }
+    navigate(`/therapist/child/${childId}`);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -366,16 +374,20 @@ ${isMchat ? 'Â© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/Fâ„
             Return to Dashboard
           </Button>
           <div className="flex gap-3">
-            {childId && (
-              <Button variant="outline" onClick={() => navigate(`/therapist/child/${childId}`)}>
-                <FileText className="h-4 w-4 mr-2" />
-                View Child Profile
-              </Button>
-            )}
-            <Button onClick={handleDownloadReport}>
+            <Button variant="outline" onClick={handleDownloadReport}>
               <Download className="h-4 w-4 mr-2" />
               Download Report
             </Button>
+            {childId && (
+              <Button
+                onClick={handleFinishAssessment}
+                disabled={isSaving}
+                className="bg-teal-600 hover:bg-teal-700"
+              >
+                <CheckCircle2 className="h-4 w-4 mr-2" />
+                Finish Assessment
+              </Button>
+            )}
           </div>
         </div>
 

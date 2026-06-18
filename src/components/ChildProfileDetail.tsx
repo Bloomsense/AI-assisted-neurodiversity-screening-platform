@@ -32,6 +32,7 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { supabase } from '../utils/supabase/client';
+import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
 type PatientRow = {
@@ -67,7 +68,7 @@ type AssessmentHistoryItem = {
   totalScore: number | null;
   riskLevel: string | null;
   notes: string | null;
-  doctorId: string | null;
+  doctorName: string | null;
 };
 
 type SessionHistoryItem = {
@@ -77,7 +78,7 @@ type SessionHistoryItem = {
   notes: string;
   duration: number | null;
   status: string | null;
-  doctorId: string | null;
+  doctorName: string | null;
 };
 
 function normalizeRiskKey(risk: string | null): string {
@@ -165,15 +166,51 @@ export default function ChildProfileDetail() {
     ? 'http://localhost:8000/make-server-8d885905'
     : `https://${projectId}.supabase.co/functions/v1/make-server-8d885905`;
 
-  // Load comments, meetings, and latest assessment on component mount
+  // Load comments, meetings, assessment/session history, and patient profile
   useEffect(() => {
-    if (childId) {
-      loadComments();
-      loadMeetings();
-      loadAssessmentHistory();
-      loadSessionHistory();
-    }
+    if (!childId) return;
+    loadPatient();
+    loadComments();
+    loadMeetings();
+    loadAssessmentHistory();
+    loadSessionHistory();
   }, [childId]);
+
+  const loadPatient = async () => {
+    if (!childId) return;
+
+    try {
+      setLoadingPatient(true);
+      const { data, error } = await supabase
+        .from('patients')
+        .select(PATIENT_SELECT_COLUMNS)
+        .eq('patient_id', childId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error loading patient:', error);
+        toast.error('Failed to load child profile');
+        setPatient(null);
+        return;
+      }
+
+      if (!data) {
+        setPatient(null);
+        return;
+      }
+
+      setPatient(data as PatientRow);
+      if (data.profile_tag) {
+        setCustomTag(String(data.profile_tag));
+      }
+    } catch (error) {
+      console.error('Error loading patient:', error);
+      toast.error('Failed to load child profile');
+      setPatient(null);
+    } finally {
+      setLoadingPatient(false);
+    }
+  };
 
   const loadComments = async () => {
     try {
@@ -250,7 +287,7 @@ export default function ChildProfileDetail() {
         totalScore: row.total_score != null ? Number(row.total_score) : null,
         riskLevel: row.risk_level as string | null,
         notes: row.notes as string | null,
-        doctorId: row.completed_by_doctor_id as string | null,
+        doctorName: row.name as string | null,
       }));
 
       setAssessmentHistory(mapped);
@@ -290,7 +327,7 @@ export default function ChildProfileDetail() {
           notes: parsed.body,
           duration: row.duration != null ? Number(row.duration) : null,
           status: row.session_status as string | null,
-          doctorId: row.doctor_id as string | null,
+          doctorName: row.doctor_id as string | null,
         };
       });
 
@@ -537,6 +574,31 @@ export default function ChildProfileDetail() {
     }
   };
 
+  if (loadingPatient) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600 mr-3" />
+        <span className="text-gray-600">Loading child profile...</span>
+      </div>
+    );
+  }
+
+  if (!childData) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
+        <AlertCircle className="h-12 w-12 text-gray-400 mb-4" />
+        <h2 className="text-xl text-gray-900 mb-2">Child profile not found</h2>
+        <p className="text-gray-600 mb-6 text-center">
+          We could not find a profile for this child. It may have been removed or the link is invalid.
+        </p>
+        <Button onClick={() => navigate('/therapist/dashboard')}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Dashboard
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -724,9 +786,9 @@ export default function ChildProfileDetail() {
                                 <span className="font-medium">Total score:</span> {assessment.totalScore}
                               </p>
                             )}
-                            {assessment.doctorId && (
+                            {assessment.doctorName && (
                               <p>
-                                <span className="font-medium">Completed by:</span> {assessment.doctorId}
+                                <span className="font-medium">Completed by:</span> {assessment.doctorName}
                               </p>
                             )}
                             {assessment.notes && (
@@ -773,9 +835,9 @@ export default function ChildProfileDetail() {
                               <span className="ml-2">· {session.duration} min</span>
                             )}
                           </p>
-                          {session.doctorId && (
+                          {session.doctorName && (
                             <p className="text-sm text-gray-600 mb-2">
-                              <span className="font-medium">Therapist ID:</span> {session.doctorId}
+                              <span className="font-medium">Therapist ID:</span> {session.doctorName}
                             </p>
                           )}
                           <p className="text-sm text-gray-700 whitespace-pre-wrap">{session.notes}</p>
