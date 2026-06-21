@@ -74,7 +74,11 @@ export default function App() {
           />
           <Route
             path="/therapist/child/:childId"
-            element={<ChildProfileDetail />}
+            element={
+              <ProtectedRoute>
+                <ChildProfileDetail />
+              </ProtectedRoute>
+            }
           />
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/admin/settings" element={<AdminSettings />} />

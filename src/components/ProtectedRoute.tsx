@@ -23,7 +23,13 @@ export default function ProtectedRoute({ children }: { children: JSX.Element }) 
     };
   }, []);
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <span className="text-gray-600">Loading...</span>
+      </div>
+    );
+  }
 
   if (!session) {
     return <Navigate to="/login" replace />;

@@ -27,12 +27,14 @@ import {
   Loader2,
   Edit2,
   X,
-  Check
+  Check,
+  Trash2
 } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { toast } from 'sonner';
 import { supabase } from '../utils/supabase/client';
 import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
+import { resolveLoggedInDoctorId } from '../utils/supabase/doctorProfile';
+import { projectId, publicAnonKey } from '../utils/supabase/info';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
 type PatientRow = {
@@ -129,6 +131,36 @@ async function fetchQuestionnaireLabels(ids: string[]): Promise<Record<string, s
   return map;
 }
 
+type CommentItem = {
+  id: number;
+  therapist: string;
+  doctorId: string;
+  date: string;
+  text: string;
+};
+
+async function fetchDoctorNames(employeeIds: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(employeeIds.filter(Boolean))];
+  if (unique.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from('doctors')
+    .select('employee_id, name')
+    .in('employee_id', unique);
+
+  if (error) {
+    console.error('fetchDoctorNames:', error);
+    return {};
+  }
+
+  const map: Record<string, string> = {};
+  for (const row of data || []) {
+    const id = String(row.employee_id || '').trim();
+    if (id) map[id] = String(row.name || id);
+  }
+  return map;
+}
+
 export default function ChildProfileDetail() {
   const navigate = useNavigate();
   const { childId } = useParams();
@@ -136,9 +168,11 @@ export default function ChildProfileDetail() {
   
   // Doctor's Comments State
   const [newComment, setNewComment] = useState('');
-  const [comments, setComments] = useState<any[]>([]);
+  const [comments, setComments] = useState<CommentItem[]>([]);
   const [loadingComments, setLoadingComments] = useState(true);
   const [addingComment, setAddingComment] = useState(false);
+  const [deletingCommentId, setDeletingCommentId] = useState<number | null>(null);
+  const [loggedInDoctorId, setLoggedInDoctorId] = useState<string | null>(null);
   
   // Follow-Up Meetings State
   const [meetingDate, setMeetingDate] = useState<Date | undefined>(undefined);
@@ -174,6 +208,7 @@ export default function ChildProfileDetail() {
     loadMeetings();
     loadAssessmentHistory();
     loadSessionHistory();
+    resolveLoggedInDoctorId().then(setLoggedInDoctorId);
   }, [childId]);
 
   const loadPatient = async () => {
@@ -213,20 +248,41 @@ export default function ChildProfileDetail() {
   };
 
   const loadComments = async () => {
+    if (!childId) return;
+
     try {
       setLoadingComments(true);
-      const response = await fetch(`${API_BASE_URL}/comments/${childId}`, {
-        headers: {
-          'Authorization': `Bearer ${publicAnonKey}`
-        }
-      });
-      const data = await response.json();
-      if (data.success) {
-        setComments(data.comments);
+      const { data, error } = await supabase
+        .from('comments')
+        .select('id, created_at, comment_text, doctor_id')
+        .eq('patient_id', childId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading comments:', error);
+        toast.error('Failed to load comments');
+        setComments([]);
+        return;
       }
+
+      const rows = data || [];
+      const doctorNames = await fetchDoctorNames(
+        rows.map((row) => String(row.doctor_id || '')),
+      );
+
+      setComments(
+        rows.map((row) => ({
+          id: Number(row.id),
+          therapist: doctorNames[String(row.doctor_id || '')] || 'Therapist',
+          doctorId: String(row.doctor_id || ''),
+          date: String(row.created_at),
+          text: String(row.comment_text || ''),
+        })),
+      );
     } catch (error) {
       console.error('Error loading comments:', error);
       toast.error('Failed to load comments');
+      setComments([]);
     } finally {
       setLoadingComments(false);
     }
@@ -276,6 +332,9 @@ export default function ChildProfileDetail() {
       const labels = await fetchQuestionnaireLabels(
         rows.map((r) => r.questionnaire_type as string | null).filter(Boolean) as string[],
       );
+      const doctorNames = await fetchDoctorNames(
+        rows.map((r) => String(r.completed_by_doctor_id || '')),
+      );
 
       const mapped: AssessmentHistoryItem[] = rows.map((row) => ({
         id: String(row.assessment_id),
@@ -287,7 +346,7 @@ export default function ChildProfileDetail() {
         totalScore: row.total_score != null ? Number(row.total_score) : null,
         riskLevel: row.risk_level as string | null,
         notes: row.notes as string | null,
-        doctorName: row.name as string | null,
+        doctorName: doctorNames[String(row.completed_by_doctor_id || '')] || null,
       }));
 
       setAssessmentHistory(mapped);
@@ -467,6 +526,7 @@ export default function ChildProfileDetail() {
   };
 
   const handleAddComment = async () => {
+    if (!childId) return;
     if (!newComment.trim()) {
       toast.error('Please enter a comment');
       return;
@@ -474,31 +534,70 @@ export default function ChildProfileDetail() {
 
     try {
       setAddingComment(true);
-      const response = await fetch(`${API_BASE_URL}/comments/${childId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${publicAnonKey}`
-        },
-        body: JSON.stringify({
-          text: newComment,
-          therapist: 'Dr. Sarah Ahmed'
-        })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        setComments([data.comment, ...comments]);
-        setNewComment('');
-        toast.success('Comment added successfully');
-      } else {
-        toast.error(data.error || 'Failed to add comment');
+      const doctorEmployeeId = await resolveLoggedInDoctorId();
+      if (!doctorEmployeeId) {
+        toast.error('Could not find your therapist profile. Please sign in again.');
+        return;
       }
+
+      const { data, error } = await supabase
+        .from('comments')
+        .insert({
+          patient_id: childId,
+          doctor_id: doctorEmployeeId,
+          comment_text: newComment.trim(),
+        })
+        .select('id, created_at, comment_text, doctor_id')
+        .single();
+
+      if (error) {
+        console.error('Error adding comment:', error);
+        toast.error(error.message || 'Failed to add comment');
+        return;
+      }
+
+      const doctorNames = await fetchDoctorNames([String(data.doctor_id || doctorEmployeeId)]);
+      const therapistName =
+        doctorNames[String(data.doctor_id || doctorEmployeeId)] || 'Therapist';
+
+      setComments([
+        {
+          id: Number(data.id),
+          therapist: therapistName,
+          doctorId: String(data.doctor_id || doctorEmployeeId),
+          date: String(data.created_at),
+          text: String(data.comment_text || ''),
+        },
+        ...comments,
+      ]);
+      setNewComment('');
+      toast.success('Comment added successfully');
     } catch (error) {
       console.error('Error adding comment:', error);
       toast.error('Failed to add comment');
     } finally {
       setAddingComment(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: number) => {
+    try {
+      setDeletingCommentId(commentId);
+      const { error } = await supabase.from('comments').delete().eq('id', commentId);
+
+      if (error) {
+        console.error('Error deleting comment:', error);
+        toast.error(error.message || 'Failed to delete comment');
+        return;
+      }
+
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      toast.success('Comment deleted');
+    } catch (error) {
+      console.error('Error deleting comment:', error);
+      toast.error('Failed to delete comment');
+    } finally {
+      setDeletingCommentId(null);
     }
   };
 
@@ -513,6 +612,7 @@ export default function ChildProfileDetail() {
       toast.error('Please select both date and time');
       return;
     }
+    if (!childData) return;
 
     try {
       setSchedulingMeeting(true);
@@ -865,7 +965,9 @@ export default function ChildProfileDetail() {
                         <div className="flex justify-between">
                           <span className="text-sm text-gray-600">Last Assessment</span>
                           <span className="text-sm font-medium">
-                            {new Date(childData.lastAssessment).toLocaleDateString()}
+                            {childData.lastAssessment
+                              ? new Date(childData.lastAssessment).toLocaleDateString()
+                              : '—'}
                           </span>
                         </div>
                         <div className="flex justify-between">
@@ -980,7 +1082,25 @@ export default function ChildProfileDetail() {
                               })}
                             </p>
                           </div>
-                          <MessageSquare className="h-4 w-4 text-gray-400" />
+                          <div className="flex items-center gap-1">
+                            {loggedInDoctorId && comment.doctorId === loggedInDoctorId && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-gray-400 hover:text-red-600"
+                                onClick={() => handleDeleteComment(comment.id)}
+                                disabled={deletingCommentId === comment.id}
+                                aria-label="Delete comment"
+                              >
+                                {deletingCommentId === comment.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            )}
+              
+                          </div>
                         </div>
                         <p className="text-sm text-gray-700">{comment.text}</p>
                       </div>
