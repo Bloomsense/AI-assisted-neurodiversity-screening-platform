@@ -45,7 +45,7 @@ export default function TherapistDashboard() {
     },
   ]);
   const [recentNotifications, setRecentNotifications] = useState<
-    Array<{ id: number; type: string; child: string; message: string; time: string; patientId?: string }>
+    Array<{ id: string; type: string; child: string; message: string; time: string; patientId?: string }>
   >([]);
   const [recentChildren, setRecentChildren] = useState<
     Array<{ id: string; name: string; age: number; createdDate: string; status: string }>
@@ -67,49 +67,44 @@ export default function TherapistDashboard() {
 
   useEffect(() => {
     const fetchDashboardStats = async () => {
-      if (!therapistUserId) return;
+      if (!therapistUserId || !doctorEmployeeId) return;
 
       const nowIso = new Date().toISOString();
-      const patientDoctorFilter = doctorEmployeeId ?? undefined;
 
-      const [patientsResult, pendingSessionsResult, upcomingAppointmentsResult, recentChildrenResult] =
+      const [patientsResult, pendingAppointmentsResult, upcomingAppointmentsResult, recentChildrenResult] =
         await Promise.all([
-        patientDoctorFilter
-          ? supabase
-              .from("patients")
-              .select("patient_id", { count: "exact", head: true })
-              .eq("assigned_doctor_id", patientDoctorFilter)
-          : Promise.resolve({ count: 0, error: null, data: null }),
+        supabase
+          .from("patients")
+          .select("patient_id", { count: "exact", head: true })
+          .eq("assigned_doctor_id", doctorEmployeeId),
         supabase
           .from("appointments")
           .select("id", { count: "exact", head: true })
-          .eq("doctor_id", therapistUserId)
+          .eq("doctor_id", doctorEmployeeId)
           .in("status", ["scheduled", "pending"])
           .gte("appointment_date", nowIso),
         supabase
           .from("appointments")
-          .select("id,patient_id,patient_name,appointment_date,status")
-          .eq("doctor_id", therapistUserId)
+          .select("id, patient_id, patient_name, appointment_date, status, notes")
+          .eq("doctor_id", doctorEmployeeId)
           .in("status", ["scheduled", "pending"])
           .gte("appointment_date", nowIso)
           .order("appointment_date", { ascending: true })
           .limit(5),
-        patientDoctorFilter
-          ? supabase
-              .from("patients")
-              .select("patient_id, name, age, profile_created_date, status, profile_tag")
-              .eq("assigned_doctor_id", patientDoctorFilter)
-              .order("profile_created_date", { ascending: false })
-              .limit(5)
-          : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from("patients")
+          .select("patient_id, name, age, profile_created_date, status, profile_tag")
+          .eq("assigned_doctor_id", doctorEmployeeId)
+          .order("profile_created_date", { ascending: false })
+          .limit(5),
       ]);
 
       if (patientsResult.error) {
         console.error("Error loading patient stats:", patientsResult.error);
       }
 
-      if (pendingSessionsResult.error) {
-        console.error("Error loading pending sessions stats:", pendingSessionsResult.error);
+      if (pendingAppointmentsResult.error) {
+        console.error("Error loading pending appointments:", pendingAppointmentsResult.error);
       }
       if (upcomingAppointmentsResult.error) {
         console.error("Error loading therapist notifications:", upcomingAppointmentsResult.error);
@@ -126,20 +121,20 @@ export default function TherapistDashboard() {
           color: "text-teal-600",
         },
         {
-          title: "Pending Sessions",
-          value: String(pendingSessionsResult.count ?? 0),
+          title: "Pending Appointments",
+          value: String(pendingAppointmentsResult.count ?? 0),
           icon: Calendar,
           color: "text-orange-600",
         },
       ]);
 
-      const notifications = (upcomingAppointmentsResult.data || []).map((item: any, idx: number) => {
-        const appointmentDate = new Date(item.appointment_date);
+      const notifications = (upcomingAppointmentsResult.data || []).map((item: Record<string, unknown>) => {
+        const appointmentDate = new Date(String(item.appointment_date));
         return {
-          id: idx + 1,
+          id: String(item.id),
           type: "appointment",
-          child: item.patient_name || "New Child",
-          message: `Upcoming appointment assigned by help desk at ${formatDateTime(appointmentDate)}`,
+          child: String(item.patient_name || "Patient"),
+          message: `Upcoming appointment on ${formatDateTime(appointmentDate)}`,
           time: formatRelativeTime(appointmentDate),
           patientId: item.patient_id ? String(item.patient_id) : undefined,
         };

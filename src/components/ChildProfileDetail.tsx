@@ -34,7 +34,6 @@ import { toast } from 'sonner';
 import { supabase } from '../utils/supabase/client';
 import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
 import { resolveLoggedInDoctorId } from '../utils/supabase/doctorProfile';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
 type PatientRow = {
@@ -139,6 +138,27 @@ type CommentItem = {
   text: string;
 };
 
+type AppointmentItem = {
+  id: string;
+  appointmentDate: string;
+  status: string;
+  notes: string | null;
+};
+
+function formatAppointmentDisplay(iso: string) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return { date: '—', time: '—' };
+  return {
+    date: d.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }),
+    time: d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+  };
+}
+
 async function fetchDoctorNames(employeeIds: string[]): Promise<Record<string, string>> {
   const unique = [...new Set(employeeIds.filter(Boolean))];
   if (unique.length === 0) return {};
@@ -177,7 +197,8 @@ export default function ChildProfileDetail() {
   // Follow-Up Meetings State
   const [meetingDate, setMeetingDate] = useState<Date | undefined>(undefined);
   const [meetingTime, setMeetingTime] = useState('');
-  const [scheduledMeetings, setScheduledMeetings] = useState<any[]>([]);
+  const [meetingNotes, setMeetingNotes] = useState('');
+  const [scheduledMeetings, setScheduledMeetings] = useState<AppointmentItem[]>([]);
   const [loadingMeetings, setLoadingMeetings] = useState(true);
   const [schedulingMeeting, setSchedulingMeeting] = useState(false);
 
@@ -194,11 +215,6 @@ export default function ChildProfileDetail() {
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
   const [loadingAssessments, setLoadingAssessments] = useState(true);
   const [loadingSessions, setLoadingSessions] = useState(true);
-
-  // Use local backend in development, cloud backend in production
-  const API_BASE_URL = import.meta.env.DEV 
-    ? 'http://localhost:8000/make-server-8d885905'
-    : `https://${projectId}.supabase.co/functions/v1/make-server-8d885905`;
 
   // Load comments, meetings, assessment/session history, and patient profile
   useEffect(() => {
@@ -289,20 +305,35 @@ export default function ChildProfileDetail() {
   };
 
   const loadMeetings = async () => {
+    if (!childId) return;
+
     try {
       setLoadingMeetings(true);
-      const response = await fetch(`${API_BASE_URL}/meetings/${childId}`, {
-        headers: {
-          'Authorization': `Bearer ${publicAnonKey}`
-        }
-      });
-      const data = await response.json();
-      if (data.success) {
-        setScheduledMeetings(data.meetings);
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('id, appointment_date, status, notes')
+        .eq('patient_id', childId)
+        .order('appointment_date', { ascending: true });
+
+      if (error) {
+        console.error('Error loading appointments:', error);
+        toast.error('Failed to load appointments');
+        setScheduledMeetings([]);
+        return;
       }
+
+      setScheduledMeetings(
+        (data || []).map((row) => ({
+          id: String(row.id),
+          appointmentDate: String(row.appointment_date),
+          status: String(row.status || 'scheduled'),
+          notes: row.notes as string | null,
+        })),
+      );
     } catch (error) {
-      console.error('Error loading meetings:', error);
-      toast.error('Failed to load meetings');
+      console.error('Error loading appointments:', error);
+      toast.error('Failed to load appointments');
+      setScheduledMeetings([]);
     } finally {
       setLoadingMeetings(false);
     }
@@ -601,13 +632,8 @@ export default function ChildProfileDetail() {
     }
   };
 
-  const generateGoogleMeetLink = () => {
-    // Mock Google Meet link generation
-    const randomId = Math.random().toString(36).substring(2, 15);
-    return `https://meet.google.com/${randomId.slice(0, 3)}-${randomId.slice(3, 7)}-${randomId.slice(7, 10)}`;
-  };
-
   const handleScheduleMeeting = async () => {
+    if (!childId) return;
     if (!meetingDate || !meetingTime) {
       toast.error('Please select both date and time');
       return;
@@ -616,61 +642,61 @@ export default function ChildProfileDetail() {
 
     try {
       setSchedulingMeeting(true);
-      const response = await fetch(`${API_BASE_URL}/meetings/${childId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${publicAnonKey}`
-        },
-        body: JSON.stringify({
-          date: meetingDate.toISOString().split('T')[0],
-          time: meetingTime,
-          parentPhone: childData.caregiverPhone
-        })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        setScheduledMeetings([data.meeting, ...scheduledMeetings]);
-        toast.success('Meeting scheduled! WhatsApp notification sent to parent.');
-        
-        // Reset form
-        setMeetingDate(undefined);
-        setMeetingTime('');
-      } else {
-        toast.error(data.error || 'Failed to schedule meeting');
+      const doctorEmployeeId = await resolveLoggedInDoctorId();
+      if (!doctorEmployeeId) {
+        toast.error('Could not find your therapist profile. Please sign in again.');
+        return;
       }
+
+      const appointmentDateTime = new Date(meetingDate);
+      const [hours, minutes] = meetingTime.split(':');
+      appointmentDateTime.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+
+      if (appointmentDateTime.getTime() < Date.now()) {
+        toast.error('Please select a future date and time');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .insert({
+          patient_id: childId,
+          patient_name: childData.name,
+          patient_age: childData.age,
+          doctor_id: doctorEmployeeId,
+          appointment_date: appointmentDateTime.toISOString(),
+          notes: meetingNotes.trim() || null,
+          status: 'scheduled',
+          created_by: doctorEmployeeId,
+        })
+        .select('id, appointment_date, status, notes')
+        .single();
+
+      if (error) {
+        console.error('Error scheduling appointment:', error);
+        toast.error(error.message || 'Failed to schedule appointment');
+        return;
+      }
+
+      setScheduledMeetings((prev) => [
+        ...prev,
+        {
+          id: String(data.id),
+          appointmentDate: String(data.appointment_date),
+          status: String(data.status || 'scheduled'),
+          notes: data.notes as string | null,
+        },
+      ].sort((a, b) => new Date(a.appointmentDate).getTime() - new Date(b.appointmentDate).getTime()));
+
+      toast.success('Follow-up appointment scheduled');
+      setMeetingDate(undefined);
+      setMeetingTime('');
+      setMeetingNotes('');
     } catch (error) {
-      console.error('Error scheduling meeting:', error);
-      toast.error('Failed to schedule meeting');
+      console.error('Error scheduling appointment:', error);
+      toast.error('Failed to schedule appointment');
     } finally {
       setSchedulingMeeting(false);
-    }
-  };
-
-  const handleSendReminder = async (meetingId: number) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/meetings/${childId}/${meetingId}/reminder`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${publicAnonKey}`
-        }
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        setScheduledMeetings(scheduledMeetings.map(meeting => 
-          meeting.id === meetingId 
-            ? { ...meeting, reminderSent: true }
-            : meeting
-        ));
-        toast.success('WhatsApp reminder sent to parent');
-      } else {
-        toast.error(data.error || 'Failed to send reminder');
-      }
-    } catch (error) {
-      console.error('Error sending reminder:', error);
-      toast.error('Failed to send reminder');
     }
   };
 
@@ -1156,11 +1182,15 @@ export default function ChildProfileDetail() {
                       </div>
                     </div>
 
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <p className="text-sm text-blue-800">
-                        <strong>Note:</strong> A Google Meet link will be automatically generated and sent to the parent via WhatsApp. 
-                        A reminder will be sent 30 minutes before the scheduled time.
-                      </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="meetingNotes">Notes (optional)</Label>
+                      <Textarea
+                        id="meetingNotes"
+                        placeholder="Add any notes for this follow-up appointment..."
+                        value={meetingNotes}
+                        onChange={(e) => setMeetingNotes(e.target.value)}
+                        className="min-h-[80px]"
+                      />
                     </div>
 
                     <Button onClick={handleScheduleMeeting} className="w-full" disabled={schedulingMeeting}>
@@ -1169,7 +1199,7 @@ export default function ChildProfileDetail() {
                       ) : (
                         <Send className="h-4 w-4 mr-2" />
                       )}
-                      {schedulingMeeting ? 'Scheduling...' : 'Schedule Meeting & Send Invitation'}
+                      {schedulingMeeting ? 'Scheduling...' : 'Schedule Meeting'}
                     </Button>
                   </div>
                 </CardContent>
@@ -1178,7 +1208,7 @@ export default function ChildProfileDetail() {
               {/* Scheduled Meetings */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Scheduled Meetings</CardTitle>
+                  <CardTitle>Scheduled Appointments</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {loadingMeetings ? (
@@ -1187,66 +1217,38 @@ export default function ChildProfileDetail() {
                     </div>
                   ) : scheduledMeetings.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-8">
-                      No meetings scheduled yet. Schedule one above.
+                      No appointments scheduled yet. Schedule one above.
                     </p>
                   ) : (
                     <div className="space-y-4">
-                      {scheduledMeetings.map((meeting) => (
+                      {scheduledMeetings.map((meeting) => {
+                        const { date, time } = formatAppointmentDisplay(meeting.appointmentDate);
+                        return (
                         <div key={meeting.id} className="border rounded-lg p-4">
                           <div className="flex items-start justify-between mb-3">
                             <div>
                               <div className="flex items-center space-x-2 mb-1">
                                 <Calendar className="h-4 w-4 text-gray-500" />
-                                <span className="font-medium">
-                                  {new Date(meeting.date).toLocaleDateString('en-US', { 
-                                    weekday: 'long',
-                                    year: 'numeric', 
-                                    month: 'long', 
-                                    day: 'numeric' 
-                                  })}
-                                </span>
+                                <span className="font-medium">{date}</span>
                               </div>
                               <div className="flex items-center space-x-2">
                                 <Clock className="h-4 w-4 text-gray-500" />
-                                <span className="text-sm text-gray-600">{meeting.time}</span>
+                                <span className="text-sm text-gray-600">{time}</span>
                               </div>
                             </div>
-                            <Badge className="bg-green-100 text-green-800">
+                            <Badge className="bg-green-100 text-green-800 capitalize">
                               {meeting.status}
                             </Badge>
                           </div>
 
-                          <div className="bg-gray-50 rounded p-3 mb-3">
-                            <p className="text-xs text-gray-600 mb-1">Google Meet Link:</p>
-                            <a 
-                              href={meeting.meetLink} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-sm text-teal-600 hover:underline break-all"
-                            >
-                              {meeting.meetLink}
-                            </a>
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-2">
-                              <Send className="h-4 w-4 text-gray-400" />
-                              <span className="text-xs text-gray-600">
-                                {meeting.reminderSent ? 'Reminder sent ✓' : 'Reminder pending'}
-                              </span>
-                            </div>
-                            {!meeting.reminderSent && (
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => handleSendReminder(meeting.id)}
-                              >
-                                Send Reminder Now
-                              </Button>
-                            )}
-                          </div>
+                          {meeting.notes && (
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 rounded p-3">
+                              {meeting.notes}
+                            </p>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
