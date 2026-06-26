@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { ArrowLeft, Save, PlayCircle, Loader2 } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
 import { resolveLoggedInDoctorId } from '../utils/supabase/doctorProfile';
@@ -19,10 +19,10 @@ export default function CreateChildProfile() {
     childName: '',
     age: '',
     gender: '',
-    contactInfo: '',
+    email: '',
     caregiverName: '',
     caregiverPhone: '',
-    remarks: ''
+    remarks: '',
   });
 
   const handleInputChange = (field: string, value: string) => {
@@ -46,22 +46,32 @@ export default function CreateChildProfile() {
 
     try {
       const assignedDoctorId = await resolveLoggedInDoctorId();
+      if (!assignedDoctorId) {
+        toast.error(
+          'Could not find your therapist profile (employee ID). Please sign in again or contact admin.',
+        );
+        setIsSaving(false);
+        return;
+      }
+
       const today = new Date().toISOString().slice(0, 10);
 
-      const patientData: Record<string, unknown> = {
+      const patientData = {
         name: formData.childName.trim(),
         age: ageNum,
         gender: formData.gender || null,
         caregiver_name: formData.caregiverName.trim(),
         caregiver_contact: formData.caregiverPhone.trim() || null,
+        email: formData.email.trim() || null,
         remarks: formData.remarks.trim() || null,
+        assigned_doctor_id: assignedDoctorId,
+        profile_created_date: today,
       };
 
-      // Insert into Supabase patients table
       const { data, error } = await supabase
         .from('patients')
         .insert([patientData])
-        .select()
+        .select('patient_id')
         .single();
 
       if (error) {
@@ -81,10 +91,9 @@ export default function CreateChildProfile() {
       toast.success('Child profile created successfully');
 
       if (startScreening) {
-        // First let the therapist choose which questionnaire to run
         navigate(`/therapist/questionnaire-selection/${childId}`);
       } else {
-        navigate(`/therapist/child/${childId}`);
+        navigate('/therapist/dashboard');
       }
     } catch (error: any) {
       console.error('Error saving patient:', error);
@@ -160,12 +169,12 @@ export default function CreateChildProfile() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="contactInfo">Contact Information</Label>
+                  <Label htmlFor="email">Email</Label>
                   <Input
-                    id="contactInfo"
-                    placeholder="Email or additional contact info"
-                    value={formData.contactInfo}
-                    onChange={(e) => handleInputChange('contactInfo', e.target.value)}
+                    id="email"
+                    placeholder="Email"
+                    value={formData.email}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
                   />
                 </div>
               </div>

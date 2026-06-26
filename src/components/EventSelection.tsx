@@ -56,6 +56,7 @@ export default function EventSelection() {
 
       if (error) {
         console.error('Error loading children for event selection:', error);
+        toast.error(error.message || 'Failed to load child profiles');
         setAllChildren([]);
         setLoadingChildren(false);
         return;

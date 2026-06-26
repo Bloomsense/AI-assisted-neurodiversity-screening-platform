@@ -107,8 +107,7 @@ export default function RegistrationPortal() {
           return status !== 'inactive';
         })
         .map((doctor: any) => {
-          // IMPORTANT: use auth-linked user_id first so appointments map to therapist login account.
-          const doctorId = doctor.user_id || doctor.doctor_id || doctor.id;
+          const doctorId = String(doctor.employee_id || '').trim();
           const userId = doctor.user_id || doctor.id || '';
           const fullName =
             doctor.name ||
@@ -255,7 +254,7 @@ export default function RegistrationPortal() {
         patientId = existingPatient.data.id;
         const updateAssignedDoctor = await supabase
           .from('patients')
-          .update({ assigned_doctor_id: selectedDoctor, updated_at: new Date().toISOString() })
+          .update({ assigned_doctor_id: selectedDoctor })
           .eq('id', patientId);
         if (updateAssignedDoctor.error) {
           console.warn('Could not update assigned_doctor_id on patient:', updateAssignedDoctor.error);
