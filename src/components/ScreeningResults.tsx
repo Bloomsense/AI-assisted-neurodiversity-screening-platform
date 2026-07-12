@@ -20,6 +20,9 @@ interface ScreeningResultsProps {
   mchatQuestions?: MChatQuestion[];
   behaviorNotes?: string;
   childId?: string;
+  questionnaireId?: string;
+  questionnaireCode?: string | null;
+  questionnaireName?: string;
   questionnaireType?: 'mchat' | 'neurodiversity';
   timelineEventId?: string;
 }
@@ -53,7 +56,14 @@ export default function ScreeningResults() {
       setIsSaving(true);
 
       try {
-        const { mchatAnswers, mchatQuestions, behaviorNotes, childId, questionnaireType = 'mchat' } = results;
+        const {
+          mchatAnswers,
+          mchatQuestions,
+          behaviorNotes,
+          childId,
+          questionnaireId,
+          questionnaireType = 'mchat',
+        } = results;
 
         // Calculate results (for DB summarization we still use basic yes/no logic)
         const convertToPassFail = (answer: string): 'Pass' | 'Fail' => {
@@ -79,6 +89,7 @@ export default function ScreeningResults() {
           totalScore: failCount,
           riskLevel,
           notes: behaviorNotes?.trim() || null,
+          questionnaireId,
           questionnaireType,
           timelineEventId: results.timelineEventId,
         });
@@ -123,10 +134,25 @@ export default function ScreeningResults() {
     );
   }
 
-  const { mchatAnswers, mchatQuestions, behaviorNotes, childId, questionnaireType = 'mchat' } = results;
+  const {
+    mchatAnswers,
+    mchatQuestions,
+    behaviorNotes,
+    childId,
+    questionnaireName,
+    questionnaireType = 'mchat',
+  } = results;
   const isMchat = questionnaireType === 'mchat';
-  const assessmentTitle = isMchat ? 'M-CHAT-R/F Screening Results' : 'Neurodiversity Core Screening Results';
-  const assessmentCriteriaLabel = isMchat ? 'M-CHAT-R/F criteria' : 'Neurodiversity Core criteria';
+  const assessmentTitle = questionnaireName
+    ? `${questionnaireName} Screening Results`
+    : isMchat
+      ? 'M-CHAT-R/F Screening Results'
+      : 'Neurodiversity Core Screening Results';
+  const assessmentCriteriaLabel = questionnaireName
+    ? `${questionnaireName} criteria`
+    : isMchat
+      ? 'M-CHAT-R/F criteria'
+      : 'Neurodiversity Core criteria';
   const scoringDescription = isMchat
     ? 'M-CHAT-R/F Scoring: Each item is scored as Pass or Fail. Screen positive if 2 or more items fail.'
     : 'Neurodiversity Core: Responses are Never, Often, Sometimes, Always. Higher frequency (Often/Always) may indicate areas for follow-up.';

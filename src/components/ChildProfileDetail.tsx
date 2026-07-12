@@ -40,7 +40,7 @@ type PatientRow = {
   patient_id: string;
   name: string;
   age: number;
-  date_of_birth: string | null;
+  email: string | null;
   gender: string | null;
   caregiver_name: string;
   caregiver_contact: string | null;

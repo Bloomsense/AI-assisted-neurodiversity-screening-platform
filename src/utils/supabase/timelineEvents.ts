@@ -80,7 +80,10 @@ export type SaveAssessmentInput = {
   totalScore: number;
   riskLevel: string;
   notes: string | null;
-  questionnaireType: 'mchat' | 'neurodiversity';
+  /** Direct questionnaires.id — preferred when available from screening flow. */
+  questionnaireId?: string;
+  /** Legacy workflow type; used only when questionnaireId is not provided. */
+  questionnaireType?: 'mchat' | 'neurodiversity';
   timelineEventId?: string;
 };
 
@@ -92,13 +95,14 @@ export async function saveAssessmentAndLinkTimeline(
     return { assessmentId: null, error: new Error('Therapist profile (employee ID) not found') };
   }
 
-  const questionnaireTypeId = await resolveQuestionnaireTypeId(input.questionnaireType);
+  let questionnaireTypeId = input.questionnaireId?.trim() || null;
+  if (!questionnaireTypeId && input.questionnaireType) {
+    questionnaireTypeId = await resolveQuestionnaireTypeId(input.questionnaireType);
+  }
   if (!questionnaireTypeId) {
     return {
       assessmentId: null,
-      error: new Error(
-        `No questionnaire registered for "${input.questionnaireType}". Add it in Admin Settings.`,
-      ),
+      error: new Error('No questionnaire selected. Choose a questionnaire and try again.'),
     };
   }
 
