@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
-import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Download, Home, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Download, Home, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { saveAssessmentAndLinkTimeline } from '../utils/supabase/timelineEvents';
@@ -13,6 +13,89 @@ interface MChatQuestion {
   id: string;
   question: string;
   order?: number;
+}
+
+const LIKERT_MAX_PER_QUESTION = 3;
+
+/** Never=0, Sometimes=1, Often=2, Always=3 */
+function likertAnswerScore(answer: string | undefined): number {
+  switch (String(answer || '').toLowerCase()) {
+    case 'never':
+      return 0;
+    case 'sometimes':
+      return 1;
+    case 'often':
+      return 2;
+    case 'always':
+      return 3;
+    default:
+      return 0;
+  }
+}
+
+function riskLevelFromPercentage(percentage: number): 'Low Risk' | 'Medium Risk' | 'High Risk' {
+  if (percentage <= 30) return 'Low Risk';
+  if (percentage <= 60) return 'Medium Risk';
+  return 'High Risk';
+}
+
+function scoreLikertAssessment(
+  answers: Record<string, string>,
+  questions: MChatQuestion[],
+): {
+  totalScore: number;
+  maxScore: number;
+  percentage: number;
+  riskLevel: 'Low Risk' | 'Medium Risk' | 'High Risk';
+  itemScores: Array<{ question: MChatQuestion; answer: string | undefined; score: number }>;
+} {
+  const itemScores = questions.map((question) => {
+    const answer = answers[question.id];
+    return {
+      question,
+      answer,
+      score: likertAnswerScore(answer),
+    };
+  });
+  const totalScore = itemScores.reduce((sum, item) => sum + item.score, 0);
+  const maxScore = questions.length * LIKERT_MAX_PER_QUESTION;
+  const percentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
+  return {
+    totalScore,
+    maxScore,
+    percentage,
+    riskLevel: riskLevelFromPercentage(percentage),
+    itemScores,
+  };
+}
+
+function scoreMchatAssessment(
+  answers: Record<string, string>,
+  questions: MChatQuestion[],
+): {
+  totalScore: number;
+  riskLevel: 'Low Risk' | 'High Risk';
+  failCount: number;
+  passCount: number;
+  isScreenPositive: boolean;
+  itemResults: Array<{ question: MChatQuestion; answer: string | undefined; result: 'Pass' | 'Fail' }>;
+} {
+  const itemResults = questions.map((question) => {
+    const answer = answers[question.id];
+    const result: 'Pass' | 'Fail' = answer && answer.toLowerCase() === 'no' ? 'Fail' : 'Pass';
+    return { question, answer, result };
+  });
+  const failCount = itemResults.filter((r) => r.result === 'Fail').length;
+  const passCount = itemResults.filter((r) => r.result === 'Pass').length;
+  const isScreenPositive = failCount >= 2;
+  return {
+    totalScore: failCount,
+    riskLevel: isScreenPositive ? 'High Risk' : 'Low Risk',
+    failCount,
+    passCount,
+    isScreenPositive,
+    itemResults,
+  };
 }
 
 interface ScreeningResultsProps {
@@ -65,29 +148,15 @@ export default function ScreeningResults() {
           questionnaireType = 'mchat',
         } = results;
 
-        // Calculate results (for DB summarization we still use basic yes/no logic)
-        const convertToPassFail = (answer: string): 'Pass' | 'Fail' => {
-          return answer.toLowerCase() === 'no' ? 'Fail' : 'Pass';
-        };
-
-        const passFailResults = mchatQuestions.map((question) => {
-          const answer = mchatAnswers[question.id];
-          const result = answer ? convertToPassFail(answer) : 'Pass';
-          return {
-            question,
-            answer,
-            result,
-          };
-        });
-
-        const failCount = passFailResults.filter((r) => r.result === 'Fail').length;
-        const isScreenPositive = failCount >= 2;
-        const riskLevel = isScreenPositive ? 'High Risk' : 'Low Risk';
+        const isMchat = questionnaireType === 'mchat';
+        const scored = isMchat
+          ? scoreMchatAssessment(mchatAnswers, mchatQuestions)
+          : scoreLikertAssessment(mchatAnswers, mchatQuestions);
 
         const { assessmentId: savedId, error } = await saveAssessmentAndLinkTimeline({
           patientId: childId,
-          totalScore: failCount,
-          riskLevel,
+          totalScore: scored.totalScore,
+          riskLevel: scored.riskLevel,
           notes: behaviorNotes?.trim() || null,
           questionnaireId,
           questionnaireType,
@@ -155,7 +224,7 @@ export default function ScreeningResults() {
       : 'Neurodiversity Core criteria';
   const scoringDescription = isMchat
     ? 'M-CHAT-R/F Scoring: Each item is scored as Pass or Fail. Screen positive if 2 or more items fail.'
-    : 'Neurodiversity Core: Responses are Never, Often, Sometimes, Always. Higher frequency (Often/Always) may indicate areas for follow-up.';
+    : 'Scoring: Never = 0, Sometimes = 1, Often = 2, Always = 3. Risk is based on total score as a percentage of the maximum (≤30% Low, ≤60% Medium, >60% High).';
 
   const formatAnswerDisplay = (answer: string | undefined): string => {
     if (!answer) return 'Not answered';
@@ -163,62 +232,90 @@ export default function ScreeningResults() {
     return answer.charAt(0).toUpperCase() + answer.slice(1).toLowerCase();
   };
 
-  // Convert answers to Pass/Fail for summary and risk
-  // M-CHAT: "No" = risk (Fail), "Yes" = no risk (Pass)
-  // Neurodiversity: "Never" = no concern (Pass), "Often" / "Sometimes" / "Always" = concern (Fail)
-  const convertToPassFail = (answer: string): 'Pass' | 'Fail' => {
-    if (isMchat) {
-      return answer.toLowerCase() === 'no' ? 'Fail' : 'Pass';
-    }
-    const a = answer.toLowerCase();
-    return a === 'never' ? 'Pass' : a === 'often' || a === 'sometimes' || a === 'always' ? 'Fail' : 'Pass';
-  };
-
-  // Calculate results
-  const passFailResults = mchatQuestions.map((question) => {
-    const answer = mchatAnswers[question.id];
-    const result = answer ? convertToPassFail(answer) : 'Pass'; // Default to Pass if no answer
-    return {
-      question,
-      answer,
-      result,
-    };
-  });
-
-  const failCount = passFailResults.filter((r) => r.result === 'Fail').length;
-  const passCount = passFailResults.filter((r) => r.result === 'Pass').length;
   const totalQuestions = mchatQuestions.length;
+  const mchatScored = isMchat ? scoreMchatAssessment(mchatAnswers, mchatQuestions) : null;
+  const likertScored = !isMchat ? scoreLikertAssessment(mchatAnswers, mchatQuestions) : null;
 
-  // M-CHAT-R/F Logic: Screen positive if 2 or more items fail
-  const isScreenPositive = failCount >= 2;
-  const riskLevel = isScreenPositive ? 'High Risk' : 'Low Risk';
+  const totalScore = isMchat ? mchatScored!.totalScore : likertScored!.totalScore;
+  const riskLevel = isMchat ? mchatScored!.riskLevel : likertScored!.riskLevel;
+  const failCount = mchatScored?.failCount ?? 0;
+  const passCount = mchatScored?.passCount ?? 0;
+  const isScreenPositive = mchatScored?.isScreenPositive ?? riskLevel === 'High Risk';
+  const scorePercentage = likertScored?.percentage ?? 0;
+  const maxScore = likertScored?.maxScore ?? 0;
+
+  const riskAlertClass =
+    riskLevel === 'High Risk'
+      ? 'border-red-500 bg-red-50'
+      : riskLevel === 'Medium Risk'
+        ? 'border-amber-500 bg-amber-50'
+        : 'border-green-500 bg-green-50';
+  const riskTextClass =
+    riskLevel === 'High Risk'
+      ? 'text-red-900'
+      : riskLevel === 'Medium Risk'
+        ? 'text-amber-900'
+        : 'text-green-900';
+  const riskDescClass =
+    riskLevel === 'High Risk'
+      ? 'text-red-800'
+      : riskLevel === 'Medium Risk'
+        ? 'text-amber-800'
+        : 'text-green-800';
+  const riskIconClass =
+    riskLevel === 'High Risk'
+      ? 'text-red-600'
+      : riskLevel === 'Medium Risk'
+        ? 'text-amber-600'
+        : 'text-green-600';
 
   const handleDownloadReport = () => {
     // Create a text report
-    const reportTitle = isMchat ? 'M-CHAT-R/F Screening Results Report' : 'Neurodiversity Core Screening Results Report';
+    const reportTitle = isMchat
+      ? 'M-CHAT-R/F Screening Results Report'
+      : `${questionnaireName || 'Questionnaire'} Screening Results Report`;
+    const summaryBlock = isMchat
+      ? `Total Questions: ${totalQuestions}
+Passed: ${passCount}
+Failed: ${failCount}
+Risk Level: ${riskLevel}
+Screen Result: ${isScreenPositive ? 'SCREEN POSITIVE' : 'SCREEN NEGATIVE'}`
+      : `Total Questions: ${totalQuestions}
+Total Score: ${totalScore} / ${maxScore}
+Score Percentage: ${scorePercentage.toFixed(1)}%
+Risk Level: ${riskLevel}
+(Never=0, Sometimes=1, Often=2, Always=3; ≤30% Low, ≤60% Medium, >60% High)`;
+
+    const detailBlock = isMchat
+      ? mchatScored!.itemResults
+          .map(
+            (r, idx) => `${idx + 1}. ${r.question.question}
+   Answer: ${formatAnswerDisplay(r.answer)}
+   Result: ${r.result}
+`,
+          )
+          .join('\n')
+      : likertScored!.itemScores
+          .map(
+            (r, idx) => `${idx + 1}. ${r.question.question}
+   Answer: ${formatAnswerDisplay(r.answer)}
+   Score: ${r.score}
+`,
+          )
+          .join('\n');
+
     const report = `${reportTitle}
 Generated: ${new Date().toLocaleString()}
 
 ========================================
 SCREENING SUMMARY
 ========================================
-Total Questions: ${totalQuestions}
-Passed: ${passCount}
-Failed: ${failCount}
-Risk Level: ${riskLevel}
-Screen Result: ${isScreenPositive ? 'SCREEN POSITIVE' : 'SCREEN NEGATIVE'}
+${summaryBlock}
 
 ========================================
 DETAILED RESULTS
 ========================================
-${passFailResults
-  .map(
-    (r, idx) => `${idx + 1}. ${r.question.question}
-   Answer: ${formatAnswerDisplay(r.answer)}
-   Result: ${r.result}
-`
-  )
-  .join('\n')}
+${detailBlock}
 
 ========================================
 BEHAVIOR OBSERVATIONS
@@ -226,7 +323,7 @@ BEHAVIOR OBSERVATIONS
 ${behaviorNotes || 'No behavior observations recorded.'}
 
 ========================================
-${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-Up' : 'Neurodiversity Core Assessment'}
+${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F™ - Modified Checklist for Autism in Toddlers, Revised, with Follow-Up' : 'Likert Screening Assessment'}
 `;
 
     // Create blob and download
@@ -234,7 +331,9 @@ ${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F�
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = isMchat ? `M-CHAT-R-F_Results_${new Date().toISOString().split('T')[0]}.txt` : `Neurodiversity_Core_Results_${new Date().toISOString().split('T')[0]}.txt`;
+    a.download = isMchat
+      ? `M-CHAT-R-F_Results_${new Date().toISOString().split('T')[0]}.txt`
+      : `Screening_Results_${new Date().toISOString().split('T')[0]}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -248,6 +347,28 @@ ${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F�
       return;
     }
     navigate(`/therapist/child/${childId}`);
+  };
+
+  const handleDraftTreatmentPlan = () => {
+    if (!childId) {
+      toast.error('Missing child profile');
+      return;
+    }
+    navigate('/therapist/treatment-plan', {
+      state: {
+        assessmentId,
+        childId,
+        behaviorNotes,
+        questionnaireName: questionnaireName || (isMchat ? 'M-CHAT-R/F' : 'Screening'),
+        questionnaireType,
+        riskLevel,
+        totalScore,
+        maxScore: isMchat ? totalQuestions : maxScore,
+        totalQuestions,
+        answers: mchatAnswers,
+        questions: mchatQuestions.map((q) => ({ id: q.id, question: q.question })),
+      },
+    });
   };
 
   return (
@@ -288,19 +409,25 @@ ${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F�
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Risk Level Alert */}
-        <Alert className={`mb-6 ${isScreenPositive ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}`}>
-          {isScreenPositive ? (
-            <AlertTriangle className={`h-5 w-5 ${isScreenPositive ? 'text-red-600' : 'text-green-600'}`} />
+        <Alert className={`mb-6 ${riskAlertClass}`}>
+          {riskLevel === 'Low Risk' ? (
+            <CheckCircle2 className={`h-5 w-5 ${riskIconClass}`} />
           ) : (
-            <CheckCircle2 className="h-5 w-5 text-green-600" />
+            <AlertTriangle className={`h-5 w-5 ${riskIconClass}`} />
           )}
-          <AlertTitle className={isScreenPositive ? 'text-red-900' : 'text-green-900'}>
-            {isScreenPositive ? 'Screen Positive - High Risk' : 'Screen Negative - Low Risk'}
+          <AlertTitle className={riskTextClass}>
+            {isMchat
+              ? isScreenPositive
+                ? 'Screen Positive - High Risk'
+                : 'Screen Negative - Low Risk'
+              : riskLevel}
           </AlertTitle>
-          <AlertDescription className={isScreenPositive ? 'text-red-800' : 'text-green-800'}>
-            {isScreenPositive
-              ? `The child has failed ${failCount} out of ${totalQuestions} items. According to ${assessmentCriteriaLabel}, this indicates a screen positive result. Strongly recommended: referral for early intervention and diagnostic testing.`
-              : `The child has failed ${failCount} out of ${totalQuestions} items. According to ${assessmentCriteriaLabel}, this indicates a screen negative result. Continue routine developmental monitoring.`}
+          <AlertDescription className={riskDescClass}>
+            {isMchat
+              ? isScreenPositive
+                ? `The child has failed ${failCount} out of ${totalQuestions} items. According to ${assessmentCriteriaLabel}, this indicates a screen positive result. Strongly recommended: referral for early intervention and diagnostic testing.`
+                : `The child has failed ${failCount} out of ${totalQuestions} items. According to ${assessmentCriteriaLabel}, this indicates a screen negative result. Continue routine developmental monitoring.`
+              : `Total score ${totalScore} out of ${maxScore} (${scorePercentage.toFixed(1)}%). According to ${assessmentCriteriaLabel}: ≤30% Low Risk, ≤60% Medium Risk, >60% High Risk.`}
           </AlertDescription>
         </Alert>
 
@@ -315,14 +442,31 @@ ${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F�
                 <p className="text-2xl font-bold text-gray-900">{totalQuestions}</p>
                 <p className="text-sm text-gray-600">Total Questions</p>
               </div>
-              <div className="text-center p-4 bg-green-50 rounded-lg">
-                <p className="text-2xl font-bold text-green-600">{passCount}</p>
-                <p className="text-sm text-gray-600">Passed</p>
-              </div>
-              <div className="text-center p-4 bg-red-50 rounded-lg">
-                <p className="text-2xl font-bold text-red-600">{failCount}</p>
-                <p className="text-sm text-gray-600">Failed</p>
-              </div>
+              {isMchat ? (
+                <>
+                  <div className="text-center p-4 bg-green-50 rounded-lg">
+                    <p className="text-2xl font-bold text-green-600">{passCount}</p>
+                    <p className="text-sm text-gray-600">Passed</p>
+                  </div>
+                  <div className="text-center p-4 bg-red-50 rounded-lg">
+                    <p className="text-2xl font-bold text-red-600">{failCount}</p>
+                    <p className="text-sm text-gray-600">Failed</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-center p-4 bg-teal-50 rounded-lg">
+                    <p className="text-2xl font-bold text-teal-600">
+                      {totalScore}/{maxScore}
+                    </p>
+                    <p className="text-sm text-gray-600">Total Score</p>
+                  </div>
+                  <div className="text-center p-4 bg-indigo-50 rounded-lg">
+                    <p className="text-2xl font-bold text-indigo-600">{scorePercentage.toFixed(1)}%</p>
+                    <p className="text-sm text-gray-600">Score Percentage</p>
+                  </div>
+                </>
+              )}
               <div className="text-center p-4 bg-blue-50 rounded-lg">
                 <p className="text-2xl font-bold text-blue-600">{riskLevel}</p>
                 <p className="text-sm text-gray-600">Risk Level</p>
@@ -341,40 +485,69 @@ ${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F�
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {passFailResults.map((item, index) => (
-                <div
-                  key={item.question.id}
-                  className={`p-4 border rounded-lg ${
-                    item.result === 'Fail' ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="font-medium text-gray-900">
-                          {index + 1}. {item.question.question}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-4 text-sm">
-                        <span className="text-gray-600">
-                          Answer: <span className="font-medium">{formatAnswerDisplay(item.answer)}</span>
-                        </span>
-                        <Badge
-                          variant={item.result === 'Fail' ? 'destructive' : 'default'}
-                          className={item.result === 'Pass' ? 'bg-green-600' : ''}
-                        >
-                          {item.result === 'Fail' ? (
-                            <XCircle className="h-3 w-3 mr-1" />
-                          ) : (
-                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                          )}
-                          {item.result}
-                        </Badge>
+              {isMchat
+                ? mchatScored!.itemResults.map((item, index) => (
+                    <div
+                      key={item.question.id}
+                      className={`p-4 border rounded-lg ${
+                        item.result === 'Fail' ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="font-medium text-gray-900">
+                              {index + 1}. {item.question.question}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm">
+                            <span className="text-gray-600">
+                              Answer: <span className="font-medium">{formatAnswerDisplay(item.answer)}</span>
+                            </span>
+                            <Badge
+                              variant={item.result === 'Fail' ? 'destructive' : 'default'}
+                              className={item.result === 'Pass' ? 'bg-green-600' : ''}
+                            >
+                              {item.result === 'Fail' ? (
+                                <XCircle className="h-3 w-3 mr-1" />
+                              ) : (
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                              )}
+                              {item.result}
+                            </Badge>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                  ))
+                : likertScored!.itemScores.map((item, index) => (
+                    <div
+                      key={item.question.id}
+                      className={`p-4 border rounded-lg ${
+                        item.score >= 2
+                          ? 'border-red-200 bg-red-50'
+                          : item.score === 1
+                            ? 'border-amber-200 bg-amber-50'
+                            : 'border-green-200 bg-green-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="font-medium text-gray-900">
+                              {index + 1}. {item.question.question}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm">
+                            <span className="text-gray-600">
+                              Answer: <span className="font-medium">{formatAnswerDisplay(item.answer)}</span>
+                            </span>
+                            <Badge variant="outline">Score: {item.score}</Badge>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
             </div>
           </CardContent>
         </Card>
@@ -392,6 +565,36 @@ ${isMchat ? '© 2009 Diana Robins, Deborah Fein, & Marianne Barton\nM-CHAT-R/F�
             </CardContent>
           </Card>
         )}
+
+        <Card className="mb-6 border-teal-100">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-teal-600" />
+              Next: Treatment Plan
+            </CardTitle>
+            <p className="text-sm text-gray-600 mt-1">
+              Draft a treatment plan and optionally generate AI suggestions from this screening.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <Button
+              onClick={handleDraftTreatmentPlan}
+              disabled={!childId || isSaving || !assessmentId}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              Draft a treatment plan & generate AI Insights
+            </Button>
+            {isSaving && (
+              <p className="text-xs text-gray-500 mt-2">Saving assessment before treatment plan...</p>
+            )}
+            {!isSaving && !assessmentId && childId && (
+              <p className="text-xs text-amber-600 mt-2">
+                Assessment must save successfully before drafting a treatment plan.
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Footer Actions */}
         <div className="flex justify-between items-center">

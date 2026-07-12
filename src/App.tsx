@@ -15,6 +15,7 @@ import CreateChildProfile from "./components/CreateChildProfile";
 import ScreeningWorkflow from "./components/ScreeningWorkflow";
 import ScreeningResults from "./components/ScreeningResults";
 import QuestionnaireSelection from "./components/QuestionnaireSelection";
+import TreatmentPlanPage from "./components/TreatmentPlanPage";
 import ChildProfileDetail from "./components/ChildProfileDetail";
 import AdminDashboard from "./components/AdminDashboard";
 import AdminSettings from "./components/AdminSettings";
@@ -71,6 +72,14 @@ export default function App() {
           <Route
             path="/therapist/screening-results"
             element={<ScreeningResults />}
+          />
+          <Route
+            path="/therapist/treatment-plan"
+            element={
+              <ProtectedRoute>
+                <TreatmentPlanPage />
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/therapist/child/:childId"

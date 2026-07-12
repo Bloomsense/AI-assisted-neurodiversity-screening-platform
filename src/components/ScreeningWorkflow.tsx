@@ -22,8 +22,8 @@ type ScreeningStage = 1 | 2;
 
 const LIKERT_ANSWER_OPTIONS = [
   { value: 'never', label: 'Never' },
-  { value: 'often', label: 'Often' },
   { value: 'sometimes', label: 'Sometimes' },
+  { value: 'often', label: 'Often' },
   { value: 'always', label: 'Always' },
 ] as const;
 

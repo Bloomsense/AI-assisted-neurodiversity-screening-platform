@@ -7,6 +7,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { registerTherapistAccountRoutes } = require('./therapistAccounts');
 const { registerDataImportRoutes } = require('./dataImport');
 const { registerPatientAssignmentRoutes } = require('./patientAssignments');
+const { registerAiInsightRoutes } = require('./aiInsights');
 
 const app = express();
 
@@ -117,6 +118,11 @@ registerPatientAssignmentRoutes({
   requireSupabase,
   sendJson,
   getSupabase: () => supabase,
+});
+
+registerAiInsightRoutes({
+  app,
+  sendJson,
 });
 
 // Assessment Tools - Get all questionnaires with questions

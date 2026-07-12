@@ -33,6 +33,7 @@ import {
 import { toast } from 'sonner';
 import { supabase } from '../utils/supabase/client';
 import { PATIENT_SELECT_COLUMNS } from '../utils/supabase/patients';
+import { parseTreatmentPlanFromNotes } from '../utils/treatmentPlan';
 import { resolveLoggedInDoctorId } from '../utils/supabase/doctorProfile';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 
@@ -69,6 +70,7 @@ type AssessmentHistoryItem = {
   totalScore: number | null;
   riskLevel: string | null;
   notes: string | null;
+  treatmentPlan: string | null;
   doctorName: string | null;
 };
 
@@ -343,23 +345,51 @@ export default function ChildProfileDetail() {
     if (!childId) return;
     try {
       setLoadingAssessments(true);
-      const { data, error } = await supabase
+
+      let rows: Record<string, unknown>[] = [];
+      const withPlan = await supabase
         .from('assessments')
         .select(
-          'assessment_id, total_score, assessment_date, notes, risk_level, questionnaire_type, completed_by_doctor_id, created_at',
+          'assessment_id, total_score, assessment_date, notes, treatment_plan, risk_level, questionnaire_type, completed_by_doctor_id, created_at',
         )
         .eq('patient_id', childId)
         .order('assessment_date', { ascending: false });
 
-      if (error) {
-        console.error('Error loading assessments:', error);
-        toast.error('Failed to load assessment history');
-        setAssessmentHistory([]);
-        setLatestAssessment(null);
-        return;
+      if (withPlan.error) {
+        const msg = (withPlan.error.message || '').toLowerCase();
+        const missingColumn =
+          msg.includes('treatment_plan') ||
+          msg.includes('column') ||
+          withPlan.error.code === 'PGRST204';
+
+        if (!missingColumn) {
+          console.error('Error loading assessments:', withPlan.error);
+          toast.error('Failed to load assessment history');
+          setAssessmentHistory([]);
+          setLatestAssessment(null);
+          return;
+        }
+
+        const withoutPlan = await supabase
+          .from('assessments')
+          .select(
+            'assessment_id, total_score, assessment_date, notes, risk_level, questionnaire_type, completed_by_doctor_id, created_at',
+          )
+          .eq('patient_id', childId)
+          .order('assessment_date', { ascending: false });
+
+        if (withoutPlan.error) {
+          console.error('Error loading assessments:', withoutPlan.error);
+          toast.error('Failed to load assessment history');
+          setAssessmentHistory([]);
+          setLatestAssessment(null);
+          return;
+        }
+        rows = (withoutPlan.data || []) as Record<string, unknown>[];
+      } else {
+        rows = (withPlan.data || []) as Record<string, unknown>[];
       }
 
-      const rows = data || [];
       const labels = await fetchQuestionnaireLabels(
         rows.map((r) => r.questionnaire_type as string | null).filter(Boolean) as string[],
       );
@@ -367,18 +397,28 @@ export default function ChildProfileDetail() {
         rows.map((r) => String(r.completed_by_doctor_id || '')),
       );
 
-      const mapped: AssessmentHistoryItem[] = rows.map((row) => ({
-        id: String(row.assessment_id),
-        date: String(row.assessment_date || row.created_at),
-        questionnaireLabel: questionnaireLabelFromRow(
-          row.questionnaire_type as string | null,
-          labels,
-        ),
-        totalScore: row.total_score != null ? Number(row.total_score) : null,
-        riskLevel: row.risk_level as string | null,
-        notes: row.notes as string | null,
-        doctorName: doctorNames[String(row.completed_by_doctor_id || '')] || null,
-      }));
+      const mapped: AssessmentHistoryItem[] = rows.map((row) => {
+        const rawNotes = (row.notes as string | null) ?? null;
+        const columnPlan =
+          typeof row.treatment_plan === 'string' && row.treatment_plan.trim()
+            ? String(row.treatment_plan).trim()
+            : null;
+        const parsed = parseTreatmentPlanFromNotes(rawNotes);
+
+        return {
+          id: String(row.assessment_id),
+          date: String(row.assessment_date || row.created_at),
+          questionnaireLabel: questionnaireLabelFromRow(
+            row.questionnaire_type as string | null,
+            labels,
+          ),
+          totalScore: row.total_score != null ? Number(row.total_score) : null,
+          riskLevel: row.risk_level as string | null,
+          notes: columnPlan ? rawNotes : parsed.behaviorNotes,
+          treatmentPlan: columnPlan || parsed.treatmentPlan,
+          doctorName: doctorNames[String(row.completed_by_doctor_id || '')] || null,
+        };
+      });
 
       setAssessmentHistory(mapped);
       setLatestAssessment(mapped[0] ?? null);
@@ -839,7 +879,7 @@ export default function ChildProfileDetail() {
             <CardHeader>
               <CardTitle>Latest Screening Summary</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <p className="text-gray-600">Questionnaire</p>
@@ -862,6 +902,14 @@ export default function ChildProfileDetail() {
                   </p>
                 </div>
               </div>
+              {latestAssessment.treatmentPlan && (
+                <div className="rounded-lg border border-teal-100 bg-teal-50/50 p-4">
+                  <p className="text-sm font-medium text-gray-900 mb-2">Treatment Plan</p>
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                    {latestAssessment.treatmentPlan}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -918,7 +966,18 @@ export default function ChildProfileDetail() {
                               </p>
                             )}
                             {assessment.notes && (
-                              <p className="text-gray-700 whitespace-pre-wrap mt-2">{assessment.notes}</p>
+                              <div className="mt-2">
+                                <p className="font-medium text-gray-900">Behavior notes</p>
+                                <p className="text-gray-700 whitespace-pre-wrap">{assessment.notes}</p>
+                              </div>
+                            )}
+                            {assessment.treatmentPlan && (
+                              <div className="mt-3 rounded-md border border-teal-100 bg-teal-50/40 p-3">
+                                <p className="font-medium text-gray-900">Treatment plan</p>
+                                <p className="text-gray-700 whitespace-pre-wrap mt-1">
+                                  {assessment.treatmentPlan}
+                                </p>
+                              </div>
                             )}
                           </div>
                         </div>
