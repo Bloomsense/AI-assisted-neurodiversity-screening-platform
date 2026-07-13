@@ -338,6 +338,24 @@ if (require.main === module) {
   app.listen(listenPort, '0.0.0.0', () => {
     console.log(`BloomSense API: http://127.0.0.1:${listenPort} (and http://localhost:${listenPort})`);
     console.log('  Credentials: api/.env → SUPABASE_URL (https://…supabase.co) + SUPABASE_SERVICE_ROLE_KEY (JWT)');
+    try {
+      const { getProvider } = require('./aiInsights');
+      const provider = getProvider();
+      const model =
+        provider === 'groq'
+          ? process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
+          : provider === 'xai'
+            ? process.env.XAI_MODEL || process.env.GROK_MODEL || 'grok-4.5'
+            : provider === 'claude'
+              ? process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514'
+              : process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+      const keyPresent = Boolean(
+        (process.env.GROQ_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY || '').trim(),
+      );
+      console.log(`  AI insights: provider=${provider} model=${model} key=${keyPresent ? 'set' : 'MISSING'}`);
+    } catch (e) {
+      console.log('  AI insights: config unavailable');
+    }
   });
 }
 

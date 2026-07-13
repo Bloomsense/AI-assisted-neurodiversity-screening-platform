@@ -1,12 +1,16 @@
 /**
- * AI treatment insights — xAI Grok (default). Optional: Claude / Gemini.
+ * AI treatment insights — Groq (default; keys start with gsk_).
+ * Optional: xAI Grok, Claude, Gemini.
  *
  * Env:
- *   AI_PROVIDER=grok|claude|gemini   (default: grok)
- *   XAI_API_KEY=...                  or GROK_API_KEY (from https://console.x.ai/)
- *   GROK_MODEL=grok-3-mini           (optional; also accepts XAI_MODEL)
- *   ANTHROPIC_API_KEY=...            if AI_PROVIDER=claude
- *   GEMINI_API_KEY=...               if AI_PROVIDER=gemini
+ *   AI_PROVIDER=groq|xai|claude|gemini   (default: groq)
+ *   GROQ_API_KEY=...                     or XAI_API_KEY if you pasted it there
+ *   GROQ_MODEL=llama-3.3-70b-versatile   (optional)
+ *
+ *   # xAI Grok (console.x.ai — different from Groq):
+ *   AI_PROVIDER=xai
+ *   XAI_API_KEY=...
+ *   XAI_MODEL=grok-4.5
  */
 
 const SYSTEM_PROMPT = `You are a pediatric neurodiversity screening assistant helping therapists draft treatment-plan ideas.
@@ -27,10 +31,21 @@ Generate 2 to 4 insight sections. Titles should fit the child's pattern (do not 
 Keep language professional, supportive, and suitable for therapist review.`;
 
 function getProvider() {
-  const raw = String(process.env.AI_PROVIDER || 'grok').trim().toLowerCase();
+  const raw = String(process.env.AI_PROVIDER || 'groq').trim().toLowerCase();
+  if (raw === 'xai' || raw === 'grok' || raw === 'x-ai') return 'xai';
   if (raw === 'claude' || raw === 'anthropic') return 'claude';
   if (raw === 'gemini' || raw === 'google') return 'gemini';
-  return 'grok';
+  return 'groq';
+}
+
+function formatProviderError(provider, status, data, model) {
+  const detail =
+    data?.error?.message ||
+    data?.error?.code ||
+    (typeof data?.error === 'string' ? data.error : null) ||
+    data?.message ||
+    JSON.stringify(data).slice(0, 300);
+  return `${provider} request failed with HTTP ${status} (model=${model}): ${detail}`;
 }
 
 function buildUserPrompt(payload) {
@@ -113,23 +128,61 @@ function normalizeInsights(parsed) {
     .filter((item) => item.insight);
 }
 
-async function callGrok(userPrompt) {
+/** Groq.com OpenAI-compatible API (keys typically start with gsk_). */
+async function callGroq(userPrompt) {
   const apiKey = (
+    process.env.GROQ_API_KEY ||
     process.env.XAI_API_KEY ||
-    process.env.GROK_API_KEY ||
     ''
   ).trim();
   if (!apiKey) {
     throw new Error(
-      'Missing XAI_API_KEY (or GROK_API_KEY). Add your Grok key from https://console.x.ai/ to api/.env',
+      'Missing GROQ_API_KEY. Add your key from https://console.groq.com/keys to api/.env',
     );
   }
 
-  const model = (
-    process.env.GROK_MODEL ||
-    process.env.XAI_MODEL ||
-    'grok-3-mini'
-  ).trim();
+  const model = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
+  console.log(`[ai] Groq request model=${model}`);
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.4,
+      max_tokens: 2048,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.error('[ai] Groq error body:', data);
+    throw new Error(formatProviderError('Groq', response.status, data, model));
+  }
+
+  const text = data?.choices?.[0]?.message?.content || '';
+  return extractJsonObject(text);
+}
+
+/** xAI Grok API (console.x.ai — not the same as Groq). */
+async function callXaiGrok(userPrompt) {
+  const apiKey = (process.env.XAI_API_KEY || process.env.GROK_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error(
+      'Missing XAI_API_KEY. Add your key from https://console.x.ai/ to api/.env',
+    );
+  }
+
+  const model = (process.env.XAI_MODEL || process.env.GROK_MODEL || 'grok-4.5').trim();
+  console.log(`[ai] xAI Grok request model=${model}`);
 
   const response = await fetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
@@ -150,11 +203,8 @@ async function callGrok(userPrompt) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message =
-      data?.error?.message ||
-      data?.message ||
-      `Grok request failed with HTTP ${response.status}`;
-    throw new Error(message);
+    console.error('[ai] xAI error body:', data);
+    throw new Error(formatProviderError('xAI Grok', response.status, data, model));
   }
 
   const text = data?.choices?.[0]?.message?.content || '';
@@ -168,6 +218,7 @@ async function callGemini(userPrompt) {
   }
 
   const model = (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
+  console.log(`[ai] Gemini request model=${model}`);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model,
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -186,11 +237,8 @@ async function callGemini(userPrompt) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message =
-      data?.error?.message ||
-      data?.message ||
-      `Gemini request failed with HTTP ${response.status}`;
-    throw new Error(message);
+    console.error('[ai] Gemini error body:', data);
+    throw new Error(formatProviderError('Gemini', response.status, data, model));
   }
 
   const text =
@@ -205,6 +253,7 @@ async function callClaude(userPrompt) {
   }
 
   const model = (process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514').trim();
+  console.log(`[ai] Claude request model=${model}`);
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -223,11 +272,8 @@ async function callClaude(userPrompt) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message =
-      data?.error?.message ||
-      data?.message ||
-      `Claude request failed with HTTP ${response.status}`;
-    throw new Error(message);
+    console.error('[ai] Claude error body:', data);
+    throw new Error(formatProviderError('Claude', response.status, data, model));
   }
 
   const text = Array.isArray(data?.content)
@@ -238,11 +284,13 @@ async function callClaude(userPrompt) {
 
 async function generateTreatmentInsights(payload) {
   const provider = getProvider();
+  console.log(`[ai] provider=${provider}`);
   const userPrompt = buildUserPrompt(payload);
   let parsed;
   if (provider === 'claude') parsed = await callClaude(userPrompt);
   else if (provider === 'gemini') parsed = await callGemini(userPrompt);
-  else parsed = await callGrok(userPrompt);
+  else if (provider === 'xai') parsed = await callXaiGrok(userPrompt);
+  else parsed = await callGroq(userPrompt);
 
   const insights = normalizeInsights(parsed);
   if (insights.length === 0) {
@@ -277,4 +325,5 @@ function registerAiInsightRoutes({ app, sendJson }) {
 module.exports = {
   registerAiInsightRoutes,
   generateTreatmentInsights,
+  getProvider,
 };
