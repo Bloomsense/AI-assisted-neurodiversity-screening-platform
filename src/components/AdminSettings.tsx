@@ -18,25 +18,14 @@ import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df
 import { supabase } from '../utils/supabase/client';
 import { getApiBaseUrl } from '../config';
 import TherapistAcccountsTab from './admin-settings/TherapistAcccountsTab';
-import AssessmentToolsTab from './admin-settings/AssessmentToolsTab';
+import AssessmentToolsTab, {
+  type Questionnaire,
+  type QuestionnaireScoringDraft,
+} from './admin-settings/AssessmentToolsTab';
 import DataManagementTab from './admin-settings/DataManagementTab';
 import SystemSettingsTab from './admin-settings/SystemSettingsTab';
 import type { TherapistAccount } from './admin-settings/TherapistAcccountsTab';
-
-
-interface QuestionnaireQuestion {
-  id: string;
-  text: string;
-  score: number;
-  isCritical: boolean;
-}
-
-interface Questionnaire {
-  id: string;
-  name: string;
-  description?: string;
-  questions: QuestionnaireQuestion[];
-}
+import { normalizeScoringCriteria } from '../utils/questionnaireScoring';
 
 export default function AdminSettings() {
   const navigate = useNavigate();
@@ -66,8 +55,8 @@ export default function AdminSettings() {
   const [newQuestionnaireName, setNewQuestionnaireName] = useState('');
   const [newQuestionnaireDescription, setNewQuestionnaireDescription] = useState('');
   const [newQuestionText, setNewQuestionText] = useState('');
-  const [newQuestionScore, setNewQuestionScore] = useState('1');
   const [newQuestionCritical, setNewQuestionCritical] = useState(false);
+  const [isSavingScoring, setIsSavingScoring] = useState(false);
   const [isLoadingQuestionnaires, setIsLoadingQuestionnaires] = useState(false);
   const [totalChildren, setTotalChildren] = useState(0);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -435,10 +424,13 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
         id: q.id,
         name: q.name || 'Untitled Questionnaire',
         description: q.description || '',
+        scoringCriteria: normalizeScoringCriteria(q.scoring_criteria),
+        highRiskScore: q.high_risk_score != null ? Number(q.high_risk_score) : null,
+        moderateRiskScore: q.moderate_risk_score != null ? Number(q.moderate_risk_score) : null,
+        lowRiskScore: q.low_risk_score != null ? Number(q.low_risk_score) : null,
         questions: (q.questions || []).map((question: any) => ({
           id: question.question_id,
           text: question.question_text || '',
-          score: question.max_score ?? 0,
           isCritical: !!question.critical_item,
         })),
       }));
@@ -525,6 +517,48 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     }
   };
 
+  const handleSaveScoringSettings = async (questionnaireId: string, draft: QuestionnaireScoringDraft) => {
+    const high = draft.highRiskScore.trim();
+    const moderate = draft.moderateRiskScore.trim();
+    const low = draft.lowRiskScore.trim();
+
+    if (!high || !moderate || !low) {
+      toast.error('Please enter High, Moderate, and Low risk score thresholds.');
+      return;
+    }
+
+    const highNum = parseInt(high, 10);
+    const moderateNum = parseInt(moderate, 10);
+    const lowNum = parseInt(low, 10);
+    if ([highNum, moderateNum, lowNum].some((n) => Number.isNaN(n) || n < 0)) {
+      toast.error('Risk scores must be non-negative numbers.');
+      return;
+    }
+    if (highNum < moderateNum) {
+      toast.error('High risk score should be greater than or equal to moderate risk score.');
+      return;
+    }
+
+    setIsSavingScoring(true);
+    try {
+      await assessmentToolsRequest(`/api/assessment-tools/questionnaires/${questionnaireId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          scoring_criteria: draft.scoringCriteria,
+          high_risk_score: highNum,
+          moderate_risk_score: moderateNum,
+          low_risk_score: lowNum,
+        }),
+      });
+      toast.success('Scoring settings saved.');
+      await fetchQuestionnaires();
+    } catch (error: any) {
+      toast.error(`Failed to save scoring settings: ${error.message}`);
+    } finally {
+      setIsSavingScoring(false);
+    }
+  };
+
   const handleAddQuestion = async () => {
     if (!selectedQuestionnaireId) {
       toast.error('Please select a questionnaire first.');
@@ -537,25 +571,17 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
       return;
     }
 
-    const score = parseInt(newQuestionScore, 10);
-    if (Number.isNaN(score) || score < 0) {
-      toast.error('Please provide a valid non-negative score.');
-      return;
-    }
-
     try {
       await assessmentToolsRequest('/api/assessment-tools/questions', {
         method: 'POST',
         body: JSON.stringify({
           questionnaires_id: selectedQuestionnaireId,
           question_text: questionText,
-          max_score: score,
           critical_item: newQuestionCritical,
         }),
       });
 
       setNewQuestionText('');
-      setNewQuestionScore('1');
       setNewQuestionCritical(false);
       toast.success('Question added.');
       await fetchQuestionnaires();
@@ -804,19 +830,19 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
                 newQuestionnaireName={newQuestionnaireName}
                 newQuestionnaireDescription={newQuestionnaireDescription}
                 newQuestionText={newQuestionText}
-                newQuestionScore={newQuestionScore}
                 newQuestionCritical={newQuestionCritical}
                 isLoadingQuestionnaires={isLoadingQuestionnaires}
+                isSavingScoring={isSavingScoring}
                 onSelectedQuestionnaireChange={setSelectedQuestionnaireId}
                 onNewQuestionnaireNameChange={setNewQuestionnaireName}
                 onNewQuestionnaireDescriptionChange={setNewQuestionnaireDescription}
                 onNewQuestionTextChange={setNewQuestionText}
-                onNewQuestionScoreChange={setNewQuestionScore}
                 onNewQuestionCriticalChange={setNewQuestionCritical}
                 onAddQuestionnaire={handleAddQuestionnaire}
                 onDeleteQuestionnaire={handleDeleteQuestionnaire}
                 onAddQuestion={handleAddQuestion}
                 onDeleteQuestion={handleDeleteQuestion}
+                onSaveScoringSettings={handleSaveScoringSettings}
               />
             </TabsContent>
   

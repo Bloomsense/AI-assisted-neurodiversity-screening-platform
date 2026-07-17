@@ -95,8 +95,7 @@ export default function TherapistDashboard() {
           .from("patients")
           .select("patient_id, name, age, profile_created_date, status, profile_tag")
           .eq("assigned_doctor_id", doctorEmployeeId)
-          .order("profile_created_date", { ascending: false })
-          .limit(5),
+          .order("profile_created_date", { ascending: false }),
       ]);
 
       if (patientsResult.error) {
@@ -246,7 +245,7 @@ export default function TherapistDashboard() {
             <CardTitle className="flex items-center">Quick Actions</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Button
                 className="h-auto p-4 flex flex-col items-center space-y-2"
                 onClick={() => navigate("/therapist/event-selection")}
@@ -262,14 +261,7 @@ export default function TherapistDashboard() {
                 <UserPlus className="h-8 w-8" />
                 <span>Create Child Profile</span>
               </Button>
-              <Button
-                variant="outline"
-                className="h-auto p-4 flex flex-col items-center space-y-2"
-                onClick={() => navigate("/therapist/questionnaire-selection")}
-              >
-                <FileText className="h-8 w-8" />
-                <span>Continue Existing Screening</span>
-              </Button>
+              
             </div>
           </CardContent>
         </Card>
@@ -333,7 +325,7 @@ export default function TherapistDashboard() {
               <CardTitle>Recent Child Profiles</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
+              <div className="max-h-80 overflow-y-auto space-y-4 pr-1">
                 {recentChildren.length === 0 ? (
                   <div className="py-8 text-center text-gray-500 text-sm">
                     <Users className="h-10 w-10 mx-auto mb-2 opacity-50" />

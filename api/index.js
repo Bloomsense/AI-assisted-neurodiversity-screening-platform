@@ -132,7 +132,9 @@ app.get('/api/assessment-tools/questionnaires', async (req, res) => {
   try {
     const { data: questionnaires, error: questionnairesError } = await supabase
       .from('questionnaires')
-      .select('id, code, name, description, ui_icon, is_active, created_at')
+      .select(
+        'id, code, name, description, ui_icon, is_active, created_at, scoring_criteria, high_risk_score, moderate_risk_score, low_risk_score',
+      )
       .eq('is_active', true)
       .order('created_at', { ascending: true });
 
@@ -207,8 +209,11 @@ app.post('/api/assessment-tools/questionnaires', async (req, res) => {
         description: description ? String(description).trim() : null,
         ui_icon: ui_icon ? String(ui_icon).trim() : null,
         is_active: true,
+        scoring_criteria: 'yes_no',
       })
-      .select('id, code, name, description, ui_icon, is_active, created_at')
+      .select(
+        'id, code, name, description, ui_icon, is_active, created_at, scoring_criteria, high_risk_score, moderate_risk_score, low_risk_score',
+      )
       .single();
 
     if (error) {
@@ -219,6 +224,74 @@ app.post('/api/assessment-tools/questionnaires', async (req, res) => {
   } catch (error) {
     console.error('[api] POST questionnaire:', error);
     return sendJson(res, 500, { success: false, error: error.message || 'Failed to create questionnaire' });
+  }
+});
+
+// Assessment Tools - Update questionnaire scoring settings
+app.patch('/api/assessment-tools/questionnaires/:id', async (req, res) => {
+  if (!requireSupabase(res)) return;
+
+  try {
+    const { id } = req.params;
+    const {
+      scoring_criteria,
+      high_risk_score,
+      moderate_risk_score,
+      low_risk_score,
+    } = req.body || {};
+
+    const update = {};
+    if (scoring_criteria !== undefined) {
+      const criteria = String(scoring_criteria).toLowerCase();
+      if (criteria !== 'yes_no' && criteria !== 'likert') {
+        return sendJson(res, 400, {
+          success: false,
+          error: 'scoring_criteria must be yes_no or likert',
+        });
+      }
+      update.scoring_criteria = criteria;
+    }
+
+    const parseThreshold = (value, label) => {
+      if (value === undefined || value === null || value === '') return null;
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new Error(`${label} must be a non-negative number`);
+      }
+      return Math.floor(n);
+    };
+
+    try {
+      if (high_risk_score !== undefined) update.high_risk_score = parseThreshold(high_risk_score, 'high_risk_score');
+      if (moderate_risk_score !== undefined) {
+        update.moderate_risk_score = parseThreshold(moderate_risk_score, 'moderate_risk_score');
+      }
+      if (low_risk_score !== undefined) update.low_risk_score = parseThreshold(low_risk_score, 'low_risk_score');
+    } catch (validationError) {
+      return sendJson(res, 400, { success: false, error: validationError.message });
+    }
+
+    if (Object.keys(update).length === 0) {
+      return sendJson(res, 400, { success: false, error: 'No scoring fields to update' });
+    }
+
+    const { data, error } = await supabase
+      .from('questionnaires')
+      .update(update)
+      .eq('id', id)
+      .select(
+        'id, code, name, description, ui_icon, is_active, created_at, scoring_criteria, high_risk_score, moderate_risk_score, low_risk_score',
+      )
+      .single();
+
+    if (error) {
+      return sendJson(res, 500, { success: false, error: error.message });
+    }
+
+    return sendJson(res, 200, { success: true, data });
+  } catch (error) {
+    console.error('[api] PATCH questionnaire:', error);
+    return sendJson(res, 500, { success: false, error: error.message || 'Failed to update questionnaire' });
   }
 });
 
@@ -266,8 +339,11 @@ app.post('/api/assessment-tools/questions', async (req, res) => {
       return sendJson(res, 400, { success: false, error: 'question_text is required' });
     }
 
-    const score = Number(max_score);
-    if (!Number.isFinite(score) || score < 0) {
+    const score =
+      max_score === undefined || max_score === null || max_score === ''
+        ? null
+        : Number(max_score);
+    if (score !== null && (!Number.isFinite(score) || score < 0)) {
       return sendJson(res, 400, { success: false, error: 'max_score must be a non-negative number' });
     }
 

@@ -2,30 +2,29 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { EventFlowState } from '../utils/supabase/timelineEvents';
 import {
-  isMchatQuestionnaire,
+  isYesNoScoring,
   QUESTION_SELECT_COLUMNS,
   QUESTIONNAIRE_SELECT_COLUMNS,
+  scoringConfigFromRow,
   type QuestionnaireRow,
 } from '../utils/supabase/questionnaires';
+import {
+  LIKERT_OPTIONS,
+  YES_NO_OPTIONS,
+  type QuestionnaireScoringConfig,
+} from '../utils/questionnaireScoring';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Progress } from './ui/progress';
 import { RadioGroup, RadioGroupItem } from './ui/radio-group';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { ArrowLeft, ArrowRight, Save, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df.png';
 import { supabase } from '../utils/supabase/client';
 
 type ScreeningStage = 1 | 2;
-
-const LIKERT_ANSWER_OPTIONS = [
-  { value: 'never', label: 'Never' },
-  { value: 'sometimes', label: 'Sometimes' },
-  { value: 'often', label: 'Often' },
-  { value: 'always', label: 'Always' },
-] as const;
 
 interface ScreeningQuestion {
   id: string;
@@ -128,7 +127,16 @@ export default function ScreeningWorkflow() {
   }, [questionnaireId]);
 
   const questionnaireLabel = questionnaire?.name || flowState.questionnaireName || 'Screening';
-  const useMchatAnswers = isMchatQuestionnaire(
+  const scoringConfig: QuestionnaireScoringConfig = questionnaire
+    ? scoringConfigFromRow(questionnaire)
+    : {
+        scoringCriteria: 'yes_no',
+        highRiskScore: null,
+        moderateRiskScore: null,
+        lowRiskScore: null,
+      };
+  const useYesNoAnswers = isYesNoScoring(
+    questionnaire?.scoring_criteria,
     questionnaire?.code ?? flowState.questionnaireCode,
     questionnaire?.name ?? flowState.questionnaireName,
   );
@@ -171,20 +179,17 @@ export default function ScreeningWorkflow() {
           id: q.id,
           question: q.question,
           order: q.order,
+          criticalItem: q.criticalItem,
         })),
         behaviorNotes,
         childId,
         questionnaireId,
         questionnaireCode: questionnaire?.code ?? flowState.questionnaireCode ?? null,
         questionnaireName: questionnaire?.name ?? flowState.questionnaireName,
-        questionnaireType: useMchatAnswers ? 'mchat' : 'neurodiversity',
+        scoringConfig,
         timelineEventId: flowState.timelineEventId,
       },
     });
-  };
-
-  const handleSaveDraft = () => {
-    toast.success('Draft saved successfully');
   };
 
   if (!questionnaireId && !loadingQuestions) {
@@ -218,10 +223,6 @@ export default function ScreeningWorkflow() {
                 <p className="text-sm text-gray-600">{questionnaireLabel}</p>
               </div>
             </div>
-            <Button variant="outline" onClick={handleSaveDraft}>
-              <Save className="h-4 w-4 mr-2" />
-              Save as Draft
-            </Button>
           </div>
         </div>
       </header>
@@ -285,20 +286,18 @@ export default function ScreeningWorkflow() {
                         value={answers[question.id] || ''}
                         onValueChange={(value) => handleAnswer(question.id, value)}
                       >
-                        {useMchatAnswers ? (
+                        {useYesNoAnswers ? (
                           <>
-                            <div className="flex items-center space-x-2">
-                              <RadioGroupItem value="yes" id={`${question.id}-yes`} />
-                              <Label htmlFor={`${question.id}-yes`}>Yes</Label>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <RadioGroupItem value="no" id={`${question.id}-no`} />
-                              <Label htmlFor={`${question.id}-no`}>No</Label>
-                            </div>
+                            {YES_NO_OPTIONS.map((opt) => (
+                              <div key={opt.value} className="flex items-center space-x-2">
+                                <RadioGroupItem value={opt.value} id={`${question.id}-${opt.value}`} />
+                                <Label htmlFor={`${question.id}-${opt.value}`}>{opt.label}</Label>
+                              </div>
+                            ))}
                           </>
                         ) : (
                           <div className="flex flex-wrap gap-x-6 gap-y-2">
-                            {LIKERT_ANSWER_OPTIONS.map((opt) => (
+                            {LIKERT_OPTIONS.map((opt) => (
                               <div key={opt.value} className="flex items-center space-x-2">
                                 <RadioGroupItem value={opt.value} id={`${question.id}-${opt.value}`} />
                                 <Label htmlFor={`${question.id}-${opt.value}`}>{opt.label}</Label>
