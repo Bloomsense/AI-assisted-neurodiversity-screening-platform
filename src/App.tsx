@@ -24,6 +24,7 @@ import SessionScreen from "./components/SessionScreen";
 import RegistrationPortal from "./components/RegistrationPortal";
 import HelpdeskSignUpPage from "./components/HelpdeskSignUpPage";
 import HelpdeskProtectedRoute from "./components/HelpdeskProtectedRoute";
+import AdminProtectedRoute from "./components/AdminProtectedRoute";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
@@ -89,8 +90,22 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/admin/dashboard" element={<AdminDashboard />} />
-          <Route path="/admin/settings" element={<AdminSettings />} />
+          <Route
+            path="/admin/dashboard"
+            element={
+              <AdminProtectedRoute>
+                <AdminDashboard />
+              </AdminProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/settings"
+            element={
+              <AdminProtectedRoute>
+                <AdminSettings />
+              </AdminProtectedRoute>
+            }
+          />
           <Route
             path="/registration/portal"
             element={

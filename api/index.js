@@ -125,6 +125,40 @@ registerAiInsightRoutes({
   sendJson,
 });
 
+// Auth admin: last sign-in times for doctor user_ids (auth.users.last_sign_in_at)
+app.post('/api/auth/users-last-sign-in', async (req, res) => {
+  if (!requireSupabase(res)) return;
+
+  try {
+    const { userIds } = req.body || {};
+    if (!Array.isArray(userIds)) {
+      return sendJson(res, 400, { success: false, error: 'userIds must be an array' });
+    }
+
+    const uniqueIds = [...new Set(userIds.map((id) => String(id || '').trim()).filter(Boolean))];
+    const result = {};
+
+    await Promise.all(
+      uniqueIds.map(async (userId) => {
+        const { data, error } = await supabase.auth.admin.getUserById(userId);
+        if (!error && data?.user) {
+          result[userId] = data.user.last_sign_in_at || null;
+        } else {
+          result[userId] = null;
+        }
+      }),
+    );
+
+    return sendJson(res, 200, { success: true, data: result });
+  } catch (error) {
+    console.error('[api] POST users-last-sign-in:', error);
+    return sendJson(res, 500, {
+      success: false,
+      error: error.message || 'Failed to fetch user last sign-in',
+    });
+  }
+});
+
 // Assessment Tools - Get all questionnaires with questions
 app.get('/api/assessment-tools/questionnaires', async (req, res) => {
   if (!requireSupabase(res)) return;

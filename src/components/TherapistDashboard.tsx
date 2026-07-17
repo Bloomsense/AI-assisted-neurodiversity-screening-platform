@@ -325,7 +325,7 @@ export default function TherapistDashboard() {
               <CardTitle>Recent Child Profiles</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="max-h-80 overflow-y-auto space-y-4 pr-1">
+              <div className="max-h-[calc(6*4.25rem+5*1rem)] overflow-y-auto space-y-4 pr-2">
                 {recentChildren.length === 0 ? (
                   <div className="py-8 text-center text-gray-500 text-sm">
                     <Users className="h-10 w-10 mx-auto mb-2 opacity-50" />
@@ -343,7 +343,7 @@ export default function TherapistDashboard() {
                   recentChildren.map((child) => (
                     <div
                       key={child.id}
-                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
+                      className="flex shrink-0 items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
                       onClick={() => navigate(`/therapist/child/${child.id}`)}
                     >
                       <div className="flex items-center space-x-3">

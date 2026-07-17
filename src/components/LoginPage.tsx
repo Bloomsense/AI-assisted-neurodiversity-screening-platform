@@ -12,6 +12,7 @@ import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df
 import { supabase } from '../utils/supabase/client';
 import { upsertHelpdeskStaffRow } from '../utils/helpdeskProfile';
 import { upsertDoctorRow } from '../utils/doctorProfile';
+import { isValidAdminCredentials, setAdminSession } from '../utils/adminAuth';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -25,12 +26,14 @@ export default function LoginPage() {
   const defaultTab =
     (location.state as { defaultTab?: string } | null)?.defaultTab === 'helpdesk'
       ? 'helpdesk'
-      : 'therapist';
+      : (location.state as { defaultTab?: string } | null)?.defaultTab === 'admin'
+        ? 'admin'
+        : 'therapist';
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   useEffect(() => {
     const t = (location.state as { defaultTab?: string } | null)?.defaultTab;
-    if (t === 'helpdesk') setActiveTab('helpdesk');
+    if (t === 'helpdesk' || t === 'admin') setActiveTab(t);
   }, [location.state]);
 
   const handleTherapistLogin = async (e: React.FormEvent) => {
@@ -67,8 +70,8 @@ export default function LoginPage() {
 
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simple admin check - in production, this would be validated via backend
-    if (adminEmail === 'admin@bloomsense.com' || adminPassword === 'admin') {
+    if (isValidAdminCredentials(adminEmail, adminPassword)) {
+      setAdminSession();
       toast.success('Logged in as administrator');
       navigate('/admin/dashboard');
     } else {
@@ -214,7 +217,7 @@ export default function LoginPage() {
                       <Input
                         id="admin-email"
                         type="email"
-                        placeholder="admin@bloomsense.com"
+                        placeholder="Email"
                         value={adminEmail}
                         onChange={(e) => setAdminEmail(e.target.value)}
                         required
@@ -231,6 +234,7 @@ export default function LoginPage() {
                         required
                       />
                     </div>
+
                     <Button type="submit" className="w-full bg-[#20B2AA] hover:bg-[#1a9890]">
                       <Shield className="h-4 w-4 mr-2" />
                       Sign In as Admin
@@ -238,13 +242,7 @@ export default function LoginPage() {
                   </div>
                 </form>
                 
-                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                  <p className="text-xs text-blue-800">
-                    <strong>Demo credentials:</strong><br />
-                    Email: admin@bloomsense.com<br />
-                    Password: admin
-                  </p>
-                </div>
+                
               </TabsContent>
 
               {/* Help Desk Login */}

@@ -22,6 +22,7 @@ import bloomSenseLogo from 'figma:asset/5df998614cf553b8ecde44808a8dc2a64d4788df
 import { toast } from 'sonner@2.0.3';
 import { supabase } from '../utils/supabase/client';
 import { getApiBaseUrl } from '../config';
+import { clearAdminSession } from '../utils/adminAuth';
 
 interface Patient {
   id: string;
@@ -103,15 +104,18 @@ export default function AdminDashboard() {
       const authUserIds = doctors_data
         .map((doctor: any) => String(doctor.user_id || '').trim())
         .filter(Boolean);
-      let usersById: Record<string, string> = {};
+      let lastSignInByUserId: Record<string, string | null> = {};
 
       try {
-        usersById = await adminRequest<Record<string, string>>('/api/auth/users-emails', {
-          method: 'POST',
-          body: JSON.stringify({ userIds: authUserIds }),
-        });
+        lastSignInByUserId = await adminRequest<Record<string, string | null>>(
+          '/api/auth/users-last-sign-in-at',
+          {
+            method: 'POST',
+            body: JSON.stringify({ userIds: authUserIds }),
+          },
+        );
       } catch (e: any) {
-        console.warn('Could not load auth user emails from API:', e?.message || e);
+        console.warn('Could not load auth last sign-in from API:', e?.message || e);
       }
 
       // Transform data to match AdminDashboard interface
@@ -167,16 +171,23 @@ export default function AdminDashboard() {
         // Use active_patients from doctors table
         const active_patients = doctor.active_patients || formatted_patients.length;
 
-        // Get last login
-        const last_login = doctor.last_login || doctor.created_at;
-        let last_login_str = '2024-01-20';
+        // Last login from auth.users (last_sign_in_at), not doctors table
+        const authUserId = String(doctor.user_id || '').trim();
+        const last_login = authUserId ? lastSignInByUserId[authUserId] : null;
+        let last_login_str = 'Never';
 
         if (last_login) {
           try {
             const login_date = new Date(last_login);
-            last_login_str = login_date.toISOString().split('T')[0];
+            last_login_str = login_date.toLocaleString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            });
           } catch {
-            last_login_str = '2024-01-20';
+            last_login_str = 'Unknown';
           }
         }
 
@@ -258,8 +269,9 @@ export default function AdminDashboard() {
   );
 
   const handleLogout = () => {
+    clearAdminSession();
     toast.success('Logged out successfully');
-    navigate('/login');
+    navigate('/login', { state: { defaultTab: 'admin' } });
   };
 
   return (

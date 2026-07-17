@@ -31,10 +31,6 @@ interface Appointment {
   status: string;
 }
 
-interface PatientRecord {
-  id: string;
-}
-
 export default function RegistrationPortal() {
   const navigate = useNavigate();
   const [helpdeskUserId, setHelpdeskUserId] = useState<string | null>(null);
@@ -232,55 +228,10 @@ export default function RegistrationPortal() {
       const [hours, minutes] = appointmentTime.split(':');
       appointmentDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
 
-      // Link intake to therapist by ensuring there is a patient profile assigned to selected doctor.
-      let patientId: string | null = null;
       const normalizedName = patientName.trim();
       const normalizedAge = parseInt(patientAge);
 
-      const existingPatient = await supabase
-        .from('patients')
-        .select('id')
-        .eq('name', normalizedName)
-        .eq('age', normalizedAge)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (existingPatient.error) {
-        throw existingPatient.error;
-      }
-
-      if (existingPatient.data?.id) {
-        patientId = existingPatient.data.id;
-        const updateAssignedDoctor = await supabase
-          .from('patients')
-          .update({ assigned_doctor_id: selectedDoctor })
-          .eq('id', patientId);
-        if (updateAssignedDoctor.error) {
-          console.warn('Could not update assigned_doctor_id on patient:', updateAssignedDoctor.error);
-        }
-      } else {
-        const insertedPatient = await supabase
-          .from('patients')
-          .insert([
-            {
-              name: normalizedName,
-              age: normalizedAge,
-              caregiver_name: 'Helpdesk Intake',
-              caregiver_contact: null,
-              remarks: notes || null,
-              assigned_doctor_id: selectedDoctor,
-            },
-          ])
-          .select('id')
-          .single<PatientRecord>();
-
-        if (insertedPatient.error) {
-          throw insertedPatient.error;
-        }
-        patientId = insertedPatient.data?.id ?? null;
-      }
-
+      // Intake only — no patient profile yet; doctor creates profile on appointment day.
       const appointmentData: Record<string, unknown> = {
         patient_name: normalizedName,
         patient_age: normalizedAge,
@@ -288,24 +239,20 @@ export default function RegistrationPortal() {
         appointment_date: appointmentDateTime.toISOString(),
         notes: notes || null,
         status: 'scheduled',
+        patient_id: null,
       };
-
-      if (patientId) {
-        appointmentData.patient_id = patientId;
-      }
 
       if (helpdeskUserId) {
         appointmentData.created_by = helpdeskUserId;
       }
 
-      let { data, error } = await supabase.from('appointments').insert([appointmentData]).select();
+      let { error } = await supabase.from('appointments').insert([appointmentData]).select();
 
       if (error && helpdeskUserId && appointmentData.created_by !== undefined) {
         const msg = (error.message || '').toLowerCase();
         if (msg.includes('created_by') || msg.includes('column')) {
           delete appointmentData.created_by;
           const retry = await supabase.from('appointments').insert([appointmentData]).select();
-          data = retry.data;
           error = retry.error;
         }
       }
@@ -315,7 +262,7 @@ export default function RegistrationPortal() {
         throw error;
       }
 
-      toast.success('Appointment scheduled and assigned to therapist successfully!');
+      toast.success('Appointment scheduled successfully!');
       
       // Refresh appointments
       if (selectedDoctor && appointmentDate) {
