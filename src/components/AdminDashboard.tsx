@@ -71,7 +71,8 @@ export default function AdminDashboard() {
     try {
       const adminRequest = async <T = unknown>(endpoint: string, options?: RequestInit): Promise<T> => {
         const base = getApiBaseUrl();
-        const url = `${base}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+        const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+        const url = base ? `${base}${path}` : path;
         const response = await fetch(url, {
           headers: {
             'Content-Type': 'application/json',
@@ -80,7 +81,25 @@ export default function AdminDashboard() {
           ...options,
         });
 
-        const result = await response.json();
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const text = await response.text();
+        const trimmed = text.trim();
+        const looksJson =
+          contentType.includes('application/json') ||
+          contentType.includes('+json') ||
+          trimmed.startsWith('{') ||
+          trimmed.startsWith('[');
+
+        if (!looksJson) {
+          if (trimmed.startsWith('<')) {
+            throw new Error(
+              'Received HTML instead of JSON. Start the API (npm run dev:api on port 3001) so /api routes are available.',
+            );
+          }
+          throw new Error(trimmed.slice(0, 200) || 'Empty response from API');
+        }
+
+        const result = JSON.parse(text);
         if (!response.ok || !result?.success) {
           throw new Error(result?.error || 'Admin request failed');
         }
@@ -108,7 +127,7 @@ export default function AdminDashboard() {
 
       try {
         lastSignInByUserId = await adminRequest<Record<string, string | null>>(
-          '/api/auth/users-last-sign-in-at',
+          '/api/auth/users-last-sign-in',
           {
             method: 'POST',
             body: JSON.stringify({ userIds: authUserIds }),
@@ -440,16 +459,6 @@ export default function AdminDashboard() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toast.info('Viewing therapist details...');
-                          }}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
                         {expandedTherapists.has(therapist.doctor_id) ? (
                           <ChevronDown className="h-5 w-5 text-gray-500" />
                         ) : (
@@ -502,13 +511,7 @@ export default function AdminDashboard() {
                                   <Badge className={`text-xs ${getStatusColor(patient.status)}`}>
                                     {patient.status}
                                   </Badge>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => toast.info(`Viewing details for ${patient.name}`)}
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
+
                                 </div>
                               </div>
                             ))}

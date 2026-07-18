@@ -81,7 +81,14 @@ export default function SessionScreen() {
       }
 
       toast.success('Session saved successfully!');
-      navigate(`/therapist/child/${childId}`);
+      navigate('/therapist/treatment-plan', {
+        state: {
+          childId,
+          sessionId,
+          behaviorNotes: combinedNotes,
+          source: 'session',
+        },
+      });
     } catch (error) {
       console.error('Error saving session:', error);
       toast.error('Failed to save session. Please try again.');

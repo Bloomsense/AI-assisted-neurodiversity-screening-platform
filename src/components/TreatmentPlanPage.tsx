@@ -16,6 +16,7 @@ import { requestTreatmentInsights } from '../utils/aiInsightsApi';
 
 export type TreatmentPlanLocationState = {
   assessmentId?: string | null;
+  sessionId?: string | null;
   childId?: string;
   behaviorNotes?: string;
   questionnaireName?: string;
@@ -26,6 +27,7 @@ export type TreatmentPlanLocationState = {
   totalQuestions?: number;
   answers?: Record<string, string>;
   questions?: Array<{ id: string; question: string }>;
+  source?: 'screening' | 'session';
 };
 
 export default function TreatmentPlanPage() {
@@ -40,6 +42,8 @@ export default function TreatmentPlanPage() {
 
   const childId = state.childId;
   const assessmentId = state.assessmentId;
+  const sessionId = state.sessionId;
+  const isSessionFlow = state.source === 'session' || Boolean(sessionId);
 
   const handleGenerateInsights = async () => {
     setGenerating(true);
@@ -112,6 +116,30 @@ export default function TreatmentPlanPage() {
             throw withColumn.error;
           }
         }
+      } else if (sessionId) {
+        const planText = treatmentPlan.trim();
+        const { data: sessionRow, error: sessionFetchError } = await supabase
+          .from('sessions')
+          .select('session_notes')
+          .eq('session_id', sessionId)
+          .maybeSingle();
+
+        if (sessionFetchError) {
+          throw sessionFetchError;
+        }
+
+        const composed = composeNotesWithTreatmentPlan(
+          sessionRow?.session_notes ? String(sessionRow.session_notes) : state.behaviorNotes,
+          planText,
+        );
+        const sessionUpdate = await supabase
+          .from('sessions')
+          .update({ session_notes: composed })
+          .eq('session_id', sessionId);
+
+        if (sessionUpdate.error) {
+          throw sessionUpdate.error;
+        }
       } else {
         toast.warning('Assessment was not saved yet; treatment plan will only show if you reopen results.');
       }
@@ -127,13 +155,13 @@ export default function TreatmentPlanPage() {
     }
   };
 
-  if (!childId && !state.riskLevel) {
+  if (!childId) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardContent className="pt-6 space-y-4 text-center">
             <p className="text-gray-600">
-              No screening results found. Complete a screening first, then draft a treatment plan.
+              No patient selected. Complete a screening or therapy session first, then draft a treatment plan.
             </p>
             <Button onClick={() => navigate('/therapist/dashboard')}>Return to Dashboard</Button>
           </CardContent>
@@ -155,7 +183,10 @@ export default function TreatmentPlanPage() {
             <div>
               <h1 className="text-2xl text-gray-900">Treatment Plan</h1>
               <p className="text-sm text-gray-600">
-                {state.questionnaireName || 'Screening'} · {state.riskLevel || 'Risk pending'}
+                {isSessionFlow
+                  ? 'Therapy session'
+                  : state.questionnaireName || 'Screening'}
+                {state.riskLevel ? ` · ${state.riskLevel}` : ''}
               </p>
             </div>
           </div>
