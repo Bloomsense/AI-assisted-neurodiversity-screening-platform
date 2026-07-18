@@ -41,7 +41,6 @@ export default function AdminSettings() {
 
   const confirmDelete = () => window.confirm('Are you sure you want to delete this item');
 
-  // Normalize CSV row keys (trim, lowercase, replace spaces with underscore)
   const normalizeKey = (key: string) => key.trim().toLowerCase().replace(/\s+/g, '_');
   const getRow = (row: Record<string, string>, key: string) => {
     const k = Object.keys(row).find(k => normalizeKey(k) === normalizeKey(key));
@@ -65,7 +64,7 @@ export default function AdminSettings() {
   const [pendingDeleteQuestionnaireId, setPendingDeleteQuestionnaireId] = useState<string | null>(null);
   const [pendingDeleteQuestionId, setPendingDeleteQuestionId] = useState<string | null>(null);
   const [isDeletingItem, setIsDeletingItem] = useState(false);
-  // Fetch patient data from Supabase
+
   const fetchPatients = async () => {
     try {
       const { data, error } = await supabase
@@ -83,7 +82,7 @@ export default function AdminSettings() {
     }
   };
 
-    // Fetch assessment data from Supabase
+   
     const fetchAssessments = async () => {
       try {
         const { data, error } = await supabase
@@ -101,7 +100,6 @@ export default function AdminSettings() {
       }
     };
 
-    // Fetch session data from Supabase
     const fetchSessions = async () => {
       try {
         const { data, error } = await supabase
@@ -119,26 +117,22 @@ export default function AdminSettings() {
       }
     };
 
-  // Convert data to CSV format
   const convertToCSV = (data: any[]): string => {
     if (data.length === 0) return '';
 
-    // Get all unique keys from all objects
     const headers = Array.from(
       new Set(data.flatMap(obj => Object.keys(obj)))
     );
 
-    // Create CSV header
     const csvHeader = headers.join(',');
 
-    // Create CSV rows
     const csvRows = data.map(row => {
       return headers.map(header => {
         const value = row[header];
-        // Handle values that might contain commas, quotes, or newlines
+        
         if (value === null || value === undefined) return '';
         const stringValue = String(value);
-        // Escape quotes and wrap in quotes if contains comma, quote, or newline
+     
         if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
           return `"${stringValue.replace(/"/g, '""')}"`;
         }
@@ -149,7 +143,6 @@ export default function AdminSettings() {
     return [csvHeader, ...csvRows].join('\n');
   };
 
-  // Download file helper
   const downloadFile = (content: string, filename: string, mimeType: string) => {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -162,7 +155,6 @@ export default function AdminSettings() {
     URL.revokeObjectURL(url);
   };
 
-  // Export as CSV
   const handleExportCSV = async () => {
     setIsExporting(true);
     try {
@@ -171,15 +163,12 @@ export default function AdminSettings() {
   
       const timestamp = new Date().toISOString().split('T')[0];
   
-      // Strip personal info if toggle is off
       const patientsToExport = includePersonal
         ? patients
         : patients.map(({ name, contact, date_of_birth, ...rest }) => rest);
   
-      // Always download patients CSV
       downloadFile(convertToCSV(patientsToExport), `patients_${timestamp}.csv`, 'text/csv');
   
-      // If assessments toggle ON — download assessments CSV separately
       if (includeScores) {
         const assessments = await fetchAssessments();
         if (assessments.length > 0) {
@@ -187,7 +176,6 @@ export default function AdminSettings() {
         }
       }
   
-      // If session toggle ON — download sessions CSV separately
       if (includeSession) {
         const sessions = await fetchSessions();
         if (sessions.length > 0) {
@@ -203,7 +191,6 @@ export default function AdminSettings() {
     }
   };
 
-  // Build nested JSON structure merging all tables
 const buildExportData = (patients: any[], assessments: any[], sessions: any[]) => {
   return patients.map(patient => {
     const patientExport: any = { ...patient };
@@ -220,7 +207,6 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
   });
 };
 
-  // Export as JSON
   const handleExportJSON = async () => {
     setIsExporting(true);
     try {
@@ -230,7 +216,6 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
       const assessments = includeScores ? await fetchAssessments() : [];
       const sessions = includeSession ? await fetchSessions() : [];
   
-      // Strip personal info if toggle is off
       const patientsToExport = includePersonal
         ? patients
         : patients.map(({ name, age,  date_of_birth, gender, caregiver_name, caregiver_contact, remarks, assigned_doctor_id, status, profile_created_date,  ...rest }) => rest);
@@ -630,7 +615,6 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     const questionnaireId = pendingDeleteQuestionnaireId;
     const questionId = pendingDeleteQuestionId;
 
-    // Close immediately to avoid UI lock while network request runs.
     setConfirmOpen(false);
     setPendingDeleteType(null);
     setPendingDeleteQuestionnaireId(null);
@@ -648,7 +632,6 @@ const buildExportData = (patients: any[], assessments: any[], sessions: any[]) =
     }
   };
 
-  // Data Import: parse CSV and validate required columns
   const parseCSVFile = (file: File): Promise<Record<string, string>[]> => {
     return new Promise((resolve, reject) => {
       if (!file.name.toLowerCase().endsWith('.csv')) {

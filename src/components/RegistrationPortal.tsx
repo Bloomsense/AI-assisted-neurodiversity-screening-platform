@@ -41,7 +41,7 @@ export default function RegistrationPortal() {
   const [doctorsLoading, setDoctorsLoading] = useState(false);
   const [doctorsError, setDoctorsError] = useState<string | null>(null);
   
-  // Form state
+
   const [patientName, setPatientName] = useState('');
   const [patientAge, setPatientAge] = useState('');
   const [selectedDoctor, setSelectedDoctor] = useState('');
@@ -68,7 +68,7 @@ export default function RegistrationPortal() {
     }
   }, [selectedDoctor, appointmentDate]);
 
-  // Generate time slots (9 AM to 5 PM, 30-minute intervals)
+ 
   const generateTimeSlots = () => {
     const slots: string[] = [];
     for (let hour = 9; hour < 17; hour++) {
@@ -84,7 +84,7 @@ export default function RegistrationPortal() {
     setDoctorsLoading(true);
     setDoctorsError(null);
     try {
-      // Use wildcard select to avoid schema-specific column errors.
+    
       const { data, error } = await supabase
         .from('doctors')
         .select('*');
@@ -143,7 +143,7 @@ export default function RegistrationPortal() {
 
   const fetchDoctorAppointments = async (doctorId: string, date: Date) => {
     try {
-      // Get start and end of the selected date
+      
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
       
@@ -166,7 +166,7 @@ export default function RegistrationPortal() {
       const appointmentsData = data || [];
       setAppointments(appointmentsData);
       
-      // Create set of booked time slots
+     
       const booked = new Set(
         appointmentsData.map((apt: Appointment) => {
           const time = new Date(apt.appointment_date);

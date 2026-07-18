@@ -72,7 +72,7 @@ export default function HelpdeskSignUpPage() {
         const { error: profileError } = await upsertHelpdeskStaffRow(data.session.user);
         if (profileError) {
           toast.warning(
-            'Account created, but saving your profile failed. Run supabase/migrations/helpdesk_staff.sql in the Supabase SQL editor, then sign in once to sync.'
+            'Account created, but saving your profile failed.'
           );
         }
       }
