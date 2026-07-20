@@ -60,7 +60,7 @@ export default function TreatmentPlanPage() {
       });
       setInsights(result.insights);
       toast.success(
-        `AI insights generated${result.provider ? ` (${result.provider})` : ''}`,
+        `AI insights generated`,
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to generate insights';
